@@ -1,0 +1,1 @@
+{"name":"MCP Server Generator","description":"Convert cURL commands, OpenAPI 3.0/3.1 specs, and API schemas into production-ready Model Context Protocol (MCP) servers with strict Zod/Pydantic validation.","requestFramePermissions":[],"majorCapabilities":["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]}
