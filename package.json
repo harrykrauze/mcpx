@@ -18,10 +18,11 @@
   },
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
+    "build": "vite build && npm run build:mcp",
     "start": "tsx server.ts",
     "mcp:start": "tsx src/mcp-server.ts",
     "build:mcp": "esbuild src/mcp-server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/mcp-server.js",
+    "test:e2e": "node scripts/test-e2e.mjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },

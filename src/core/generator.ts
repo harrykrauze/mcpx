@@ -22,6 +22,7 @@ Your sole responsibility is to convert user-supplied API snippets (cURL commands
 2. Deterministic Type Safety:
    - TypeScript target: Strict Zod schemas (\`z.object({...})\`) for all tool input parameters and responses.
      Use standard modern @modelcontextprotocol/sdk patterns (e.g. Server, StdioServerTransport, ListToolsRequestSchema, CallToolRequestSchema).
+     Format Zod validation errors strictly using \`parseResult.error.message\` (avoid deprecated or untyped \`.errors\` property).
    - Python target: FastMCP (\`from mcp.server.fastmcp import FastMCP\`) or standard \`mcp.server\` with Pydantic (\`BaseModel\`) validation models.
 3. Security & Error Handling:
    - Never hardcode secrets, tokens, or bearer headers in generated code. Always extract them into environment variables (e.g., \`process.env.API_KEY\` or \`os.getenv("API_KEY")\`).
