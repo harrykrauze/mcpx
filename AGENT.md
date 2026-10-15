@@ -13,6 +13,9 @@ Autonomous development and workspace rules for Google Antigravity.
 - `npm run dev` - Local development server (Web UI + Express API)
 - `npm run mcp:start` - Run standalone stdio MCP server via tsx
 - `npm run build:mcp` - Bundle standalone stdio MCP server to `dist/mcp-server.js`
+- `npm run test:e2e` - Run dual TypeScript + Python FastMCP integration tests
+- `npm run test:e2e:python` - Run Python FastMCP integration test
+- `npm run test:e2e:ts` - Run TypeScript integration test
 
 ## Deterministic Constraints
 - `.env` holds `GEMINI_API_KEY` and must NEVER be committed or logged.
