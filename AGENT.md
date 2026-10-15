@@ -10,7 +10,9 @@ Autonomous development and workspace rules for Google Antigravity.
 ## Operational Commands
 - `npm run build` - Production build (tsc + vite build)
 - `npm run lint` - Type verification (tsc --noEmit)
-- `npm run dev` - Local development server
+- `npm run dev` - Local development server (Web UI + Express API)
+- `npm run mcp:start` - Run standalone stdio MCP server via tsx
+- `npm run build:mcp` - Bundle standalone stdio MCP server to `dist/mcp-server.js`
 
 ## Deterministic Constraints
 - `.env` holds `GEMINI_API_KEY` and must NEVER be committed or logged.
