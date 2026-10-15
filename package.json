@@ -1,7 +1,17 @@
 {
   "name": "mcp-server-generator",
+  "description": "Convert cURL commands, OpenAPI 3.0/3.1 specs, and API schemas into production-ready Model Context Protocol (MCP) servers with strict Zod/Pydantic validation.",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "gemini",
+    "openapi",
+    "curl",
+    "ai-agents"
+  ],
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",

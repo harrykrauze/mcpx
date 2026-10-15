@@ -245,7 +245,7 @@ curl -X POST "https://api.resend.com/emails" \\
         {/* Footer actions */}
         <div className="mt-3 flex items-center justify-between">
           <span className="text-[11px] text-zinc-400 hidden sm:inline">
-            Press <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 font-mono text-[10px]">⌘ Enter</kbd> to generate
+            Press <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 font-mono text-[10px]">Ctrl / ⌘ + Enter</kbd> to generate
           </span>
 
           <button
