@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "mcp-server-generator": {
+      "command": "node",
+      "args": [
+        "c:/Users/A/Documents/mcpx/dist/mcp-server.js"
+      ],
+      "env": {
+        "GEMINI_API_KEY": "YOUR_GEMINI_API_KEY"
+      }
+    }
+  }
+}
