@@ -31,6 +31,22 @@
 - `generate_mcp_server`: Transforms API snippets into executable TypeScript (@modelcontextprotocol/sdk) or Python (FastMCP with stateless_http=True) MCP servers.
 - `evaluate_fraud_transaction`: Real-time risk scoring and transaction policy evaluation tool.
 
+## M2M Monetization & x402 Protocol
+- Discovery operations are 100% free of charge (0 EUR): `tools/list`, `initialize`, `notifications/initialized`, `ping`, `/health`, `/llms.txt`, `/.well-known/*`.
+- Per-call metering matrix:
+  - `evaluate_fraud_transaction`: 1 cent (€0.01)
+  - `analyze_jev_semantic_ast`: 1 cent (€0.01)
+  - `calculate_u_value_iso6946`: 2 cents (€0.02)
+  - `generate_mcp_server`: 5 cents (€0.05)
+  - `POST /api/generate`: 5 cents (€0.05)
+- Credit exhaustion response:
+  - Returns `HTTP 402 Payment Required` with L402 challenge header:
+    `WWW-Authenticate: L402 token="mcpx", invoice="https://mcpx.harrykrauze.com/billing/topup?tenant={tenantId}"`
+  - Headers: `X-MCPX-Tenant`, `X-MCPX-Balance-Cents`, `X-MCPX-Required-Cents`.
+  - JSON-RPC error code: `402`.
+  - Warning header: `X-MCPX-Low-Balance: true` when remaining balance < 50 cents.
+- Balance topup: Programmatic credit topup via `POST /keys/topup` authenticated with `MCPX_MASTER_KEY`.
+
 ## Client Integration (Claude Code & Cursor)
 
 ### Claude Code (CLI)

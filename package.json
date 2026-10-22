@@ -41,10 +41,12 @@
     "test:key-lifecycle": "tsx scripts/test-key-lifecycle.ts",
     "test:telemetry": "tsx scripts/test-analytics-telemetry.ts",
     "test:domain-tools": "tsx scripts/test-domain-tools.ts",
+    "test:x402-billing": "tsx scripts/test-x402-billing.ts",
     "telemetry:query": "tsx scripts/query-telemetry.ts",
     "key:provision": "tsx scripts/provision-key.ts",
     "key:list": "tsx scripts/manage-keys.ts --action list",
     "key:revoke": "tsx scripts/manage-keys.ts --action revoke",
+    "key:topup": "tsx scripts/manage-keys.ts --action topup",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },

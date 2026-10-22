@@ -1,3 +1,16 @@
+export type BillingMode = "prepaid" | "postpaid" | "unlimited";
+
+export interface BillingDetails {
+  mode: BillingMode;
+  balanceCents: number;             // Vesels skaitlis (eirocenti), novēršot peldošā punkta kļūdas
+  currency: "EUR";
+  costPerToolCallCents: number;     // Bāzes cena standarta rīkam (noklusētā: 1 cents)
+  costPerGenerateCents: number;     // Cena koda ģenerēšanai (noklusētā: 5 centi)
+  totalSpentCents: number;          // Vēsturiskais kopējais patēriņš
+  lastTopupAt?: string;             // ISO 8601 laika zīmogs
+  lowBalanceThresholdCents: number; // Slieksnis brīdinājuma galvenei (noklusētais: 50 centi)
+}
+
 export interface ProvisionKeyPayload {
   tenantId?: string;
   userId?: string;
@@ -7,6 +20,8 @@ export interface ProvisionKeyPayload {
   scopes?: string[];
   expiresInDays?: number;
   requestsLimit?: number;
+  initialBalanceCents?: number;
+  billingMode?: BillingMode;
 }
 
 export interface ApiKeyRecord {
@@ -16,6 +31,7 @@ export interface ApiKeyRecord {
   description?: string;
   plan: "free" | "pro" | "enterprise";
   status: "active" | "revoked";
+  billing?: BillingDetails;
   requestsLimit?: number;
   rateLimit?: number;
   scopes?: string[];
@@ -67,6 +83,10 @@ export interface AuthContext {
   plan: "free" | "pro" | "enterprise";
   requestsLimit?: number;
   scopes?: string[];
+  apiKey?: string;
+  keyId?: string;
+  billing: BillingDetails;
+  isMaster: boolean;
 }
 
 export type AuthResult =
@@ -290,6 +310,18 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
           tenantId: "master-admin",
           plan: "enterprise",
           scopes: ["mcp:read", "mcp:write", "mcp:generate", "mcp:admin"],
+          apiKey: token,
+          keyId: "master-admin",
+          isMaster: true,
+          billing: {
+            mode: "unlimited",
+            balanceCents: 999999,
+            currency: "EUR",
+            costPerToolCallCents: 1,
+            costPerGenerateCents: 5,
+            totalSpentCents: 0,
+            lowBalanceThresholdCents: 50,
+          },
         },
       };
     }
@@ -303,6 +335,18 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
             tenantId: "master-admin",
             plan: "enterprise",
             scopes: ["mcp:read", "mcp:write", "mcp:generate", "mcp:admin"],
+            apiKey: token,
+            keyId: "master-admin",
+            isMaster: true,
+            billing: {
+              mode: "unlimited",
+              balanceCents: 999999,
+              currency: "EUR",
+              costPerToolCallCents: 1,
+              costPerGenerateCents: 5,
+              totalSpentCents: 0,
+              lowBalanceThresholdCents: 50,
+            },
           },
         };
       }
@@ -361,6 +405,16 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
               }
             }
 
+            const billing: BillingDetails = record.billing || {
+              mode: "prepaid",
+              balanceCents: 100,
+              currency: "EUR",
+              costPerToolCallCents: 1,
+              costPerGenerateCents: 5,
+              totalSpentCents: 0,
+              lowBalanceThresholdCents: 50,
+            };
+
             return {
               authorized: true,
               context: {
@@ -369,6 +423,10 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
                 plan: record.plan,
                 requestsLimit: record.requestsLimit,
                 scopes: record.scopes || ["mcp:read", "mcp:write", "mcp:generate"],
+                apiKey: token,
+                keyId: record.keyId || (await computeKeyId(token)),
+                billing,
+                isMaster: false,
               },
             };
           }

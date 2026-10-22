@@ -6,6 +6,8 @@ import {
   computeKeyId,
   ApiKeyRecord,
   ProvisionKeyPayload,
+  BillingMode,
+  BillingDetails,
   AnalyticsEngineDataPoint,
   AnalyticsEngineDataset,
   Env,
@@ -29,11 +31,12 @@ export interface TelemetryPoint {
   tenantId?: string;
   method: string;
   toolName?: string;
-  status: "success" | "timeout" | "security_violation" | "client_error" | "revoked" | "server_error";
+  status: "success" | "timeout" | "security_violation" | "client_error" | "revoked" | "server_error" | "payment_required";
   clientType?: string;
   executionTimeMs: number;
   statusCode: number;
   payloadSizeBytes?: number;
+  costCents?: number;
 }
 
 export function detectClientType(userAgent: string | null): string {
@@ -78,7 +81,7 @@ export function recordTelemetry(
           doubles: [
             Math.max(0, Math.round(point.executionTimeMs)),
             point.statusCode,
-            point.payloadSizeBytes ?? 0,
+            point.costCents !== undefined ? point.costCents : (point.payloadSizeBytes ?? 0),
           ],
         });
       } catch (err) {
@@ -91,9 +94,126 @@ export function recordTelemetry(
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id, X-Master-Key",
+  "Access-Control-Expose-Headers": "WWW-Authenticate, X-MCPX-Tenant, X-MCPX-Balance-Cents, X-MCPX-Required-Cents, X-MCPX-Low-Balance",
 };
+
+export function getToolCostCents(toolName: string): number {
+  switch (toolName) {
+    case "evaluate_fraud_transaction":
+      return 1;
+    case "analyze_jev_semantic_ast":
+      return 1;
+    case "calculate_u_value_iso6946":
+      return 2;
+    case "generate_mcp_server":
+      return 5;
+    default:
+      return 1;
+  }
+}
+
+export async function deductCredits(
+  env: Env,
+  apiKey: string | undefined,
+  billing: BillingDetails,
+  costCents: number
+): Promise<{ balanceCents: number; lowBalance: boolean }> {
+  if (billing.mode === "unlimited" || !apiKey || !env.MCPX_KEYS) {
+    return {
+      balanceCents: billing.balanceCents,
+      lowBalance: billing.balanceCents < billing.lowBalanceThresholdCents,
+    };
+  }
+
+  const newBalance = Math.max(0, billing.balanceCents - costCents);
+  const newSpent = billing.totalSpentCents + costCents;
+  billing.balanceCents = newBalance;
+  billing.totalSpentCents = newSpent;
+
+  try {
+    const rawRecord = await env.MCPX_KEYS.get(`key:${apiKey}`, "text");
+    if (rawRecord) {
+      const cleaned = rawRecord.replace(/^\uFEFF/, "").trim();
+      const record = JSON.parse(cleaned) as ApiKeyRecord;
+      record.billing = billing;
+      await env.MCPX_KEYS.put(`key:${apiKey}`, JSON.stringify(record));
+    }
+  } catch (err) {
+    console.error("Failed to update billing in KV:", err);
+  }
+
+  return {
+    balanceCents: newBalance,
+    lowBalance: newBalance < billing.lowBalanceThresholdCents,
+  };
+}
+
+export function create402RestResponse(
+  tenantId: string,
+  balanceCents: number,
+  costCents: number
+): Response {
+  const invoiceUrl = `https://mcpx.harrykrauze.com/billing/topup?tenant=${encodeURIComponent(tenantId)}`;
+  return new Response(
+    JSON.stringify({
+      error: "Payment Required: Insufficient credit balance.",
+      code: 402,
+      tenantId,
+      balanceCents,
+      requiredCents: costCents,
+      invoice: invoiceUrl,
+    }),
+    {
+      status: 402,
+      headers: {
+        "Content-Type": "application/json",
+        "WWW-Authenticate": `L402 token="mcpx", invoice="${invoiceUrl}"`,
+        "X-MCPX-Tenant": tenantId,
+        "X-MCPX-Balance-Cents": String(balanceCents),
+        "X-MCPX-Required-Cents": String(costCents),
+        ...CORS_HEADERS,
+      },
+    }
+  );
+}
+
+export function create402McpResponse(
+  reqId: string | number | null | undefined,
+  tenantId: string,
+  balanceCents: number,
+  costCents: number
+): Response {
+  const invoiceUrl = `https://mcpx.harrykrauze.com/billing/topup?tenant=${encodeURIComponent(tenantId)}`;
+  return new Response(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id: reqId ?? null,
+      error: {
+        code: 402,
+        message: `Payment Required: Insufficient credit balance. Required: ${costCents} cents, available: ${balanceCents} cents. Top up at: ${invoiceUrl}`,
+        data: {
+          tenantId,
+          balanceCents,
+          requiredCents: costCents,
+          invoice: invoiceUrl,
+        },
+      },
+    }),
+    {
+      status: 402,
+      headers: {
+        "Content-Type": "application/json",
+        "WWW-Authenticate": `L402 token="mcpx", invoice="${invoiceUrl}"`,
+        "X-MCPX-Tenant": tenantId,
+        "X-MCPX-Balance-Cents": String(balanceCents),
+        "X-MCPX-Required-Cents": String(costCents),
+        ...CORS_HEADERS,
+      },
+    }
+  );
+}
 
 const MAX_PAYLOAD_BYTES = 512 * 1024; // 512 KB drošības slieksnis
 
@@ -112,12 +232,15 @@ export default {
         method: string;
         toolName?: string;
         status?: TelemetryPoint["status"];
+        costCents?: number;
       }
     ): Response => {
       const executionTimeMs = Date.now() - startTime;
       let status = options.status;
       if (!status) {
-        if (response.status >= 500) {
+        if (response.status === 402) {
+          status = "payment_required";
+        } else if (response.status >= 500) {
           status = "server_error";
         } else if (response.status === 401 || response.status === 403) {
           const authHeader = response.headers.get("WWW-Authenticate") || "";
@@ -139,6 +262,7 @@ export default {
         executionTimeMs,
         statusCode: response.status,
         payloadSizeBytes,
+        costCents: options.costCents,
       });
       return response;
     };
@@ -202,6 +326,22 @@ export default {
 - \`analyze_jev_semantic_ast\`: Advanced static code analysis and AST injection scanning using Jev rules. Detects prototype pollution (__proto__, setPrototypeOf), dynamic execution (eval, Function), system process access (process.env, child_process), and network/SSRF vectors (fetch, sockets) with standard or paranoid strictness.
 - \`generate_mcp_server\`: Transforms API snippets into executable TypeScript (@modelcontextprotocol/sdk) or Python (FastMCP with stateless_http=True) MCP servers.
 - \`evaluate_fraud_transaction\`: Real-time risk scoring and transaction policy evaluation tool.
+
+## M2M Monetization & x402 Protocol
+- Discovery operations are 100% free of charge (0 EUR): \`tools/list\`, \`initialize\`, \`notifications/initialized\`, \`ping\`, \`/health\`, \`/llms.txt\`, \`/.well-known/*\`.
+- Per-call metering matrix:
+  - \`evaluate_fraud_transaction\`: 1 cent (€0.01)
+  - \`analyze_jev_semantic_ast\`: 1 cent (€0.01)
+  - \`calculate_u_value_iso6946\`: 2 cents (€0.02)
+  - \`generate_mcp_server\`: 5 cents (€0.05)
+  - \`POST /api/generate\`: 5 cents (€0.05)
+- Credit exhaustion response:
+  - Returns \`HTTP 402 Payment Required\` with L402 challenge header:
+    \`WWW-Authenticate: L402 token="mcpx", invoice="https://mcpx.harrykrauze.com/billing/topup?tenant={tenantId}"\`
+  - Headers: \`X-MCPX-Tenant\`, \`X-MCPX-Balance-Cents\`, \`X-MCPX-Required-Cents\`.
+  - JSON-RPC error code: \`402\`.
+  - Warning header: \`X-MCPX-Low-Balance: true\` when remaining balance < 50 cents.
+- Balance topup: Programmatic credit topup via \`POST /keys/topup\` authenticated with \`MCPX_MASTER_KEY\`.
 
 ## Client Integration (Claude Code & Cursor)
 
@@ -391,6 +531,19 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           expiresAt = new Date(Date.now() + payload.expiresInDays * 24 * 60 * 60 * 1000).toISOString();
         }
 
+        const initialBalance = typeof payload.initialBalanceCents === "number"
+          ? Math.max(0, Math.round(payload.initialBalanceCents))
+          : 100;
+        const billing: BillingDetails = {
+          mode: payload.billingMode || "prepaid",
+          balanceCents: initialBalance,
+          currency: "EUR",
+          costPerToolCallCents: 1,
+          costPerGenerateCents: 5,
+          totalSpentCents: 0,
+          lowBalanceThresholdCents: 50,
+        };
+
         const newApiKey = generateApiKey();
         const keyId = await computeKeyId(newApiKey);
         const record: ApiKeyRecord = {
@@ -400,6 +553,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           description,
           plan,
           status: "active",
+          billing,
           requestsLimit: payload.requestsLimit,
           rateLimit,
           scopes,
@@ -421,6 +575,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
               description: record.description ?? null,
               plan: record.plan,
               status: record.status,
+              billing: record.billing,
               rateLimit: record.rateLimit,
               scopes: record.scopes,
               createdAt: record.createdAt,
@@ -510,6 +665,16 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
               ? `${rawKey.slice(0, 10)}...${rawKey.slice(-4)}`
               : "mcpx_live_...";
 
+            const billing: BillingDetails = record.billing || {
+              mode: "prepaid",
+              balanceCents: 100,
+              currency: "EUR",
+              costPerToolCallCents: 1,
+              costPerGenerateCents: 5,
+              totalSpentCents: 0,
+              lowBalanceThresholdCents: 50,
+            };
+
             keysList.push({
               keyId,
               maskedKey,
@@ -517,6 +682,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
               description: record.description ?? null,
               plan: record.plan,
               status: record.status,
+              billing,
               rateLimit: record.rateLimit || 10,
               scopes: record.scopes || ["mcp:read", "mcp:write", "mcp:generate"],
               createdAt: record.createdAt || null,
@@ -701,6 +867,170 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       }
     }
 
+    // Kredītu papildināšanas galapunkts administratoram (POST /keys/topup)
+    if (url.pathname === "/keys/topup" && request.method === "POST") {
+      // 1. Ātruma ierobežotājs
+      if (env.RATE_LIMITER) {
+        const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
+        const { success } = await env.RATE_LIMITER.limit({ key: `topup:${clientIp}` });
+        if (!success) {
+          return track(
+            new Response(
+              JSON.stringify({ error: "Too Many Requests: Rate limit exceeded." }),
+              { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "60", ...CORS_HEADERS } }
+            ),
+            { method: "keys/topup", status: "security_violation" }
+          );
+        }
+      }
+
+      // 2. Master administratora autorizācija
+      const masterAuth = await validateMasterAuth(request, env);
+      if (!masterAuth.authorized) {
+        const headers = new Headers(masterAuth.response.headers);
+        for (const [k, v] of Object.entries(CORS_HEADERS)) {
+          headers.set(k, v);
+        }
+        return track(
+          new Response(masterAuth.response.body, {
+            status: masterAuth.response.status,
+            headers,
+          }),
+          { method: "keys/topup", status: "security_violation" }
+        );
+      }
+
+      if (!env.MCPX_KEYS) {
+        return track(
+          new Response(
+            JSON.stringify({ error: "Storage not configured." }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: "keys/topup", status: "server_error" }
+        );
+      }
+
+      try {
+        const payload = (await request.json().catch(() => ({}))) as {
+          tenantId?: string;
+          keyId?: string;
+          apiKey?: string;
+          amountCents: number;
+          reason?: string;
+        };
+
+        if (typeof payload.amountCents !== "number" || payload.amountCents <= 0 || !Number.isInteger(payload.amountCents)) {
+          return track(
+            new Response(
+              JSON.stringify({ error: "Bad Request: 'amountCents' must be a positive integer." }),
+              { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { method: "keys/topup", status: "client_error" }
+          );
+        }
+
+        const targetIdentifier = (payload.keyId || payload.apiKey || payload.tenantId || "").trim();
+        if (!targetIdentifier) {
+          return track(
+            new Response(
+              JSON.stringify({ error: "Bad Request: 'keyId', 'apiKey', or 'tenantId' is required." }),
+              { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { method: "keys/topup", status: "client_error" }
+          );
+        }
+
+        // Meklējam atslēgu KV krātuvē
+        let actualKey = targetIdentifier;
+        let rawRecord = await env.MCPX_KEYS.get(`key:${targetIdentifier}`, "text");
+
+        if (!rawRecord) {
+          const resolvedKey = await env.MCPX_KEYS.get(`id:${targetIdentifier}`, "text");
+          if (resolvedKey) {
+            actualKey = resolvedKey.trim();
+            rawRecord = await env.MCPX_KEYS.get(`key:${actualKey}`, "text");
+          }
+        }
+
+        if (!rawRecord) {
+          const listRes = await env.MCPX_KEYS.list({ prefix: "key:" });
+          for (const k of listRes.keys) {
+            const candidateRaw = await env.MCPX_KEYS.get(k.name, "text");
+            if (candidateRaw) {
+              try {
+                const candRecord = JSON.parse(candidateRaw.replace(/^\uFEFF/, "").trim()) as ApiKeyRecord;
+                const computedId = candRecord.keyId || (await computeKeyId(k.name.slice(4)));
+                if (
+                  candRecord.keyId === targetIdentifier ||
+                  candRecord.tenantId === targetIdentifier ||
+                  candRecord.userId === targetIdentifier ||
+                  computedId === targetIdentifier
+                ) {
+                  actualKey = k.name.slice(4);
+                  rawRecord = candidateRaw;
+                  break;
+                }
+              } catch {
+                // Turpināt meklēšanu
+              }
+            }
+          }
+        }
+
+        if (!rawRecord) {
+          return track(
+            new Response(
+              JSON.stringify({ error: "Not Found: API key or tenant not found." }),
+              { status: 404, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { method: "keys/topup", status: "client_error" }
+          );
+        }
+
+        const record = JSON.parse(rawRecord.replace(/^\uFEFF/, "").trim()) as ApiKeyRecord;
+        if (!record.billing) {
+          record.billing = {
+            mode: "prepaid",
+            balanceCents: 100,
+            currency: "EUR",
+            costPerToolCallCents: 1,
+            costPerGenerateCents: 5,
+            totalSpentCents: 0,
+            lowBalanceThresholdCents: 50,
+          };
+        }
+
+        record.billing.balanceCents += payload.amountCents;
+        record.billing.lastTopupAt = new Date().toISOString();
+
+        await env.MCPX_KEYS.put(`key:${actualKey}`, JSON.stringify(record));
+
+        return track(
+          new Response(
+            JSON.stringify({
+              success: true,
+              keyId: record.keyId || (await computeKeyId(actualKey)),
+              tenantId: record.tenantId || record.userId,
+              billing: record.billing,
+              addedCents: payload.amountCents,
+              reason: payload.reason || "Manual topup",
+              message: `Successfully topped up ${payload.amountCents} cents (€${(payload.amountCents / 100).toFixed(2)}). New balance: ${record.billing.balanceCents} cents (€${(record.billing.balanceCents / 100).toFixed(2)}).`,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { tenantId: record.tenantId || "master-admin", method: "keys/topup", status: "success" }
+        );
+      } catch (err: any) {
+        return track(
+          new Response(
+            JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: "keys/topup", status: "server_error" }
+        );
+      }
+    }
+
     // Atslēgas statusa un patēriņa pārbaude (GET /keys/status)
     if (url.pathname === "/keys/status" && request.method === "GET") {
       const auth = await requireAuth(request, env);
@@ -719,7 +1049,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         );
       }
 
-      const { userId, plan, requestsLimit, tenantId } = auth.context;
+      const { userId, plan, requestsLimit, tenantId, billing } = auth.context;
       let usage = 0;
       if (env.MCPX_KEYS) {
         const usageStr = await env.MCPX_KEYS.get(`usage:${userId}`, "text");
@@ -733,6 +1063,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             userId,
             plan,
             status: "active",
+            billing,
             usage,
             requestsLimit: requestsLimit ?? null,
           }),
@@ -1017,6 +1348,51 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             const toolName = body.params?.name;
             const toolArgs = body.params?.arguments || {};
 
+            const validTools = [
+              "calculate_u_value_iso6946",
+              "analyze_jev_semantic_ast",
+              "generate_mcp_server",
+              "evaluate_fraud_transaction",
+            ];
+
+            if (!toolName || !validTools.includes(toolName)) {
+              return track(
+                new Response(
+                  JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: reqId,
+                    error: {
+                      code: -32601,
+                      message: `Unknown tool: '${toolName}'`,
+                    },
+                  }),
+                  { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+                ),
+                { tenantId: activeTenant, method: "tools/call", toolName: String(toolName || "none"), status: "client_error" }
+              );
+            }
+
+            // x402 / L402 Kredītu pārbaude
+            const cost = getToolCostCents(toolName);
+            if (auth.context.billing.mode !== "unlimited" && auth.context.billing.balanceCents < cost) {
+              return track(
+                create402McpResponse(reqId, activeTenant, auth.context.billing.balanceCents, cost),
+                { tenantId: activeTenant, method: "tools/call", toolName, status: "payment_required", costCents: 0 }
+              );
+            }
+
+            // Atomārā bilances atskaitīšana
+            const { balanceCents, lowBalance } = await deductCredits(
+              env,
+              auth.context.apiKey,
+              auth.context.billing,
+              cost
+            );
+            const billingHeaders: Record<string, string> = {
+              "X-MCPX-Balance-Cents": String(balanceCents),
+              ...(lowBalance ? { "X-MCPX-Low-Balance": "true" } : {}),
+            };
+
             if (toolName === "calculate_u_value_iso6946") {
               try {
                 const result = calculateUValueIso6946(toolArgs as UValueCalculationInput);
@@ -1036,10 +1412,10 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                     }),
                     {
                       status: 200,
-                      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+                      headers: { "Content-Type": "application/json", ...billingHeaders, ...CORS_HEADERS },
                     }
                   ),
-                  { tenantId: activeTenant, method: "tools/call", toolName: "calculate_u_value_iso6946", status: "success" }
+                  { tenantId: activeTenant, method: "tools/call", toolName: "calculate_u_value_iso6946", status: "success", costCents: cost }
                 );
               } catch (calcErr: any) {
                 return track(
@@ -1052,7 +1428,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                         message: `Invalid params for calculate_u_value_iso6946: ${calcErr.message || String(calcErr)}`,
                       },
                     }),
-                    { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+                    { status: 400, headers: { "Content-Type": "application/json", ...billingHeaders, ...CORS_HEADERS } }
                   ),
                   { tenantId: activeTenant, method: "tools/call", toolName: "calculate_u_value_iso6946", status: "client_error" }
                 );
@@ -1078,10 +1454,10 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                     }),
                     {
                       status: 200,
-                      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+                      headers: { "Content-Type": "application/json", ...billingHeaders, ...CORS_HEADERS },
                     }
                   ),
-                  { tenantId: activeTenant, method: "tools/call", toolName: "analyze_jev_semantic_ast", status: "success" }
+                  { tenantId: activeTenant, method: "tools/call", toolName: "analyze_jev_semantic_ast", status: "success", costCents: cost }
                 );
               } catch (astErr: any) {
                 return track(
@@ -1094,7 +1470,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                         message: `Invalid params for analyze_jev_semantic_ast: ${astErr.message || String(astErr)}`,
                       },
                     }),
-                    { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+                    { status: 400, headers: { "Content-Type": "application/json", ...billingHeaders, ...CORS_HEADERS } }
                   ),
                   { tenantId: activeTenant, method: "tools/call", toolName: "analyze_jev_semantic_ast", status: "client_error" }
                 );
@@ -1114,7 +1490,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                         message: "Invalid params: 'prompt' string argument is required.",
                       },
                     }),
-                    { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+                    { status: 400, headers: { "Content-Type": "application/json", ...billingHeaders, ...CORS_HEADERS } }
                   ),
                   { tenantId: activeTenant, method: "tools/call", toolName: "generate_mcp_server", status: "client_error" }
                 );
@@ -1143,11 +1519,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                       "Content-Type": "application/json",
                       "X-MCPX-User": userId,
                       "X-MCPX-Plan": plan,
+                      ...billingHeaders,
                       ...CORS_HEADERS,
                     },
                   }
                 ),
-                { tenantId: activeTenant, method: "tools/call", toolName: "generate_mcp_server", status: "success" }
+                { tenantId: activeTenant, method: "tools/call", toolName: "generate_mcp_server", status: "success", costCents: cost }
               );
             }
 
@@ -1180,10 +1557,10 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                   }),
                   {
                     status: 200,
-                    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+                    headers: { "Content-Type": "application/json", ...billingHeaders, ...CORS_HEADERS },
                   }
                 ),
-                { tenantId: activeTenant, method: "tools/call", toolName: "evaluate_fraud_transaction", status: "success" }
+                { tenantId: activeTenant, method: "tools/call", toolName: "evaluate_fraud_transaction", status: "success", costCents: cost }
               );
             }
 
@@ -1232,6 +1609,14 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         }
 
         // 2.5. Tradicionālā (legacy) HTTP POST specifikācijas ģenerēšana
+        const cost = 5;
+        if (auth.context.billing.mode !== "unlimited" && auth.context.billing.balanceCents < cost) {
+          return track(
+            create402RestResponse(activeTenant, auth.context.billing.balanceCents, cost),
+            { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), toolName: "generate_mcp_server", status: "payment_required", costCents: 0 }
+          );
+        }
+
         const rawInput = body.prompt || body.inputSnippet || body.message || body.input || body.spec;
 
         if (!rawInput || typeof rawInput !== "string") {
@@ -1243,6 +1628,17 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), status: "client_error" }
           );
         }
+
+        const { balanceCents, lowBalance } = await deductCredits(
+          env,
+          auth.context.apiKey,
+          auth.context.billing,
+          cost
+        );
+        const billingHeaders: Record<string, string> = {
+          "X-MCPX-Balance-Cents": String(balanceCents),
+          ...(lowBalance ? { "X-MCPX-Low-Balance": "true" } : {}),
+        };
 
         const result = await generateMcpSpec(rawInput, env.GEMINI_API_KEY);
 
@@ -1262,11 +1658,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                 "Content-Type": "application/json",
                 "X-MCPX-User": userId,
                 "X-MCPX-Plan": plan,
+                ...billingHeaders,
                 ...CORS_HEADERS,
               },
             }
           ),
-          { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), toolName: "generate_mcp_server", status: "success" }
+          { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), toolName: "generate_mcp_server", status: "success", costCents: cost }
         );
       } catch (err: any) {
         return track(

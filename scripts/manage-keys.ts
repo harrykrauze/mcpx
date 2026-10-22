@@ -1,12 +1,13 @@
 /**
  * scripts/manage-keys.ts
  * 
- * Administratora CLI rīks API atslēgu inventarizācijai un tūlītējai atsaukšanai.
+ * Administratora CLI rīks API atslēgu inventarizācijai, tūlītējai atsaukšanai un bilances papildināšanai.
  * 
  * Lietošana:
  *   npm run key:list
  *   npm run key:list -- --status active
  *   npm run key:revoke -- --key "key_6db5d05407f6"
+ *   npm run key:topup -- --key "key_6db5d05407f6" --amount 500
  */
 
 import dotenv from "dotenv";
@@ -14,17 +15,19 @@ import dotenv from "dotenv";
 dotenv.config();
 
 interface CliArgs {
-  action: "list" | "revoke";
+  action: "list" | "revoke" | "topup";
   status?: string;
   target?: string;
+  amount?: number;
   url: string;
   masterKey?: string;
 }
 
 function parseArgs(args: string[]): CliArgs {
-  let action: "list" | "revoke" = "list";
+  let action: "list" | "revoke" | "topup" = "list";
   let status: string | undefined = undefined;
   let target: string | undefined = undefined;
+  let amount: number | undefined = undefined;
   let url = process.env.TARGET_URL || "https://mcpx.harrykrauze.com";
   let masterKey = process.env.MCPX_MASTER_KEY || process.env.MCPX_API_KEY;
 
@@ -32,33 +35,40 @@ function parseArgs(args: string[]): CliArgs {
     const arg = args[i];
     if (arg === "--action" && args[i + 1]) {
       const a = args[++i];
-      if (a === "list" || a === "revoke") action = a;
+      if (a === "list" || a === "revoke" || a === "topup") action = a;
     } else if (arg.startsWith("--action=")) {
       const a = arg.split("=")[1];
-      if (a === "list" || a === "revoke") action = a;
+      if (a === "list" || a === "revoke" || a === "topup") action = a as any;
     } else if (arg === "--status" && args[i + 1]) {
       status = args[++i];
     } else if (arg.startsWith("--status=")) {
       status = arg.split("=")[1];
-    } else if ((arg === "--key" || arg === "--keyId" || arg === "--id" || arg === "-k") && args[i + 1]) {
+    } else if (arg === "--amount" && args[i + 1]) {
+      amount = parseInt(args[++i], 10);
+      action = "topup";
+    } else if (arg.startsWith("--amount=")) {
+      amount = parseInt(arg.split("=")[1], 10);
+      action = "topup";
+    } else if ((arg === "--key" || arg === "--keyId" || arg === "--id" || arg === "--tenant" || arg === "--tenantId" || arg === "-k") && args[i + 1]) {
       target = args[++i];
-      action = "revoke";
-    } else if (arg.startsWith("--key=") || arg.startsWith("--keyId=") || arg.startsWith("--id=")) {
+    } else if (arg.startsWith("--key=") || arg.startsWith("--keyId=") || arg.startsWith("--id=") || arg.startsWith("--tenant=") || arg.startsWith("--tenantId=")) {
       target = arg.split("=")[1];
-      action = "revoke";
     } else if (arg === "--url" && args[i + 1]) {
       url = args[++i];
     } else if (arg === "--masterKey" && args[i + 1]) {
       masterKey = args[++i];
     } else if (!arg.startsWith("-")) {
-      if (!target) {
+      if (!target && !/^\d+$/.test(arg)) {
         target = arg;
-        action = "revoke";
+      } else if (/^\d+$/.test(arg) && !amount) {
+        amount = parseInt(arg, 10);
+      } else if (!target) {
+        target = arg;
       }
     }
   }
 
-  return { action, status, target, url, masterKey };
+  return { action, status, target, amount, url, masterKey };
 }
 
 async function listKeys(args: CliArgs) {
@@ -101,15 +111,29 @@ async function listKeys(args: CliArgs) {
     " | " +
     "STATUS".padEnd(10) +
     " | " +
+    "MODE".padEnd(10) +
+    " | " +
+    "BALANCE (EUR)".padEnd(14) +
+    " | " +
+    "SPENT (EUR)".padEnd(12) +
+    " | " +
     "RATE".padEnd(6) +
     " | " +
     "CREATED AT".padEnd(24) +
     " |"
   );
-  console.log("|" + "-".repeat(110) + "|");
+  console.log("|" + "-".repeat(154) + "|");
 
   for (const k of data.keys) {
     const statusLabel = k.status === "active" ? "\x1b[32mactive\x1b[0m" : "\x1b[31mrevoked\x1b[0m";
+    const mode = k.billing?.mode || "prepaid";
+    const balance = typeof k.billing?.balanceCents === "number"
+      ? `€${(k.billing.balanceCents / 100).toFixed(2)}`
+      : "N/A";
+    const spent = typeof k.billing?.totalSpentCents === "number"
+      ? `€${(k.billing.totalSpentCents / 100).toFixed(2)}`
+      : "€0.00";
+
     console.log(
       "| " +
       (k.keyId || "").padEnd(18) +
@@ -119,6 +143,12 @@ async function listKeys(args: CliArgs) {
       (k.tenantId || "").padEnd(20) +
       " | " +
       statusLabel.padEnd(19) +
+      " | " +
+      mode.padEnd(10) +
+      " | " +
+      balance.padEnd(14) +
+      " | " +
+      spent.padEnd(12) +
       " | " +
       String(k.rateLimit || 10).padEnd(6) +
       " | " +
@@ -160,6 +190,51 @@ async function revokeKey(args: CliArgs) {
   console.log(`  Paziņojums: ${data.message}\n`);
 }
 
+async function topupKey(args: CliArgs) {
+  if (!args.target) {
+    console.error("KĻŪDA: Bilances papildināšanai jānorāda --key <keyId, apiKey vai tenantId>.");
+    process.exit(1);
+  }
+
+  if (!args.amount || args.amount <= 0 || !Number.isInteger(args.amount)) {
+    console.error("KĻŪDA: Jānorāda pozitīvs centu daudzums ar --amount <centi> (piemēram, --amount 500 priekš €5.00).");
+    process.exit(1);
+  }
+
+  const endpoint = `${args.url.replace(/\/+$/, "")}/keys/topup`;
+  console.log(`Sūtām bilances papildināšanas pieprasījumu uz ${endpoint}...`);
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${args.masterKey}`,
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    },
+    body: JSON.stringify({
+      keyId: args.target,
+      amountCents: args.amount,
+      reason: "Manual CLI Topup",
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`Kļūda papildinot bilanci (HTTP ${res.status}): ${errText}`);
+    process.exit(1);
+  }
+
+  const data = (await res.json()) as any;
+  console.log("\n✅ BILANCE VEIKSMĪGI PAPILDINĀTA!\n");
+  console.log(`  Key ID:          ${data.keyId}`);
+  console.log(`  Nomnieks:        ${data.tenantId}`);
+  console.log(`  Pievienots:      €${(data.addedCents / 100).toFixed(2)} (${data.addedCents} centi)`);
+  console.log(`  Jaunā bilance:   €${(data.billing?.balanceCents / 100).toFixed(2)} (${data.billing?.balanceCents} centi)`);
+  console.log(`  Kopā iztērēts:   €${(data.billing?.totalSpentCents / 100).toFixed(2)}`);
+  console.log(`  Režīms:          ${data.billing?.mode}`);
+  console.log(`  Pēdējā papild.:  ${data.billing?.lastTopupAt}\n`);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
@@ -179,6 +254,8 @@ async function main() {
     await listKeys(args);
   } else if (args.action === "revoke") {
     await revokeKey(args);
+  } else if (args.action === "topup") {
+    await topupKey(args);
   }
 }
 
