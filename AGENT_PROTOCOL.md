@@ -62,3 +62,6 @@
   - Atziņu un arhitektūras lēmumu dokumentēšana.
   - Backlog atjaunošana (P3/P4 zema riska uzlabojumi).
   - Aģenta noteikumu un shēmu atjaunināšana.
+  - **Asinhronās Telemetrijas Standarts:** Visai telemetrijas reģistrēšanai obligāti jāizmanto `ctx.waitUntil(...)` bez bloķējošas ietekmes uz klienta atbildes laiku (<0.1 ms overhead).
+  - **Graceful Degradation:** Telemetrijas nepieejamība (`env.ANALYTICS === undefined` vai kvotu pārtēriņš) nekad nedrīkst izsaukt 500 kļūdu klienta pieprasījumam. Visas kļūdas tiek klusi pārtvertas (`try/catch`).
+  - **Stingra Datu Punktu Shēma (Analytics Engine Contract):** Fiksēt `blob1-5` (tenantId, method, toolName, status, clientType) un `double1-3` (executionTimeMs, statusCode, payloadSizeBytes) un `index1` (tenantId) kā bāzes standartu visiem turpmākajiem malas servisiem.

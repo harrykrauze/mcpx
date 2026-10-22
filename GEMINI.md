@@ -28,3 +28,12 @@
 - Pēc katras izmaiņas jāveic termināļa verifikācija:
   - `npx tsc --noEmit` (prasība: 0 tipu kļūdu).
   - Integrācijas un drošības testi (prasība: visi testi sekmīgi).
+
+## 6. Asinhronās Telemetrijas un Malas Analītikas Standarts
+- **Asinhronās Telemetrijas Standarts:** Visai telemetrijas un metrikas fiksēšanai Workers vidē OBLIGĀTI jāizmanto `ctx.waitUntil(...)`. Aizliegts bloķēt HTTP atbildes straumi vai radīt aizturi klienta pieprasījumam (<0.1 ms overhead).
+- **Graceful Degradation:** Telemetrijas sasaistes trūkums (`env.ANALYTICS === undefined`), analītikas kvotu izsīkums vai iekšējas datu bāzes kļūdas NEKAD nedrīkst izsaukt HTTP 500 kļūdu vai pārtraukt pamata MCP/API servisu sniegšanu. Visas kļūdas tiek klusi pārtvertas (`try/catch`).
+- **Stingra Datu Punktu Shēma (Analytics Engine Contract):**
+  - `indexes`: `[index1: tenantId]`
+  - `blobs`: `[blob1: tenantId, blob2: method, blob3: toolName, blob4: status, blob5: clientType]`
+  - `doubles`: `[double1: executionTimeMs, double2: statusCode, double3: payloadSizeBytes]`
+  - Šī shēma ir saistoša visiem turpmākajiem malas servisiem un mikroservisiem `mcpx` ekosistēmā.
