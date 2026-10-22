@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mcpx",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "routes": [
+    {
+      "pattern": "mcpx.harrykrauze.com",
+      "custom_domain": true
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "MCPX_KEYS",
+      "id": "10a9a338595d40a5b424d3be11e26860"
+    }
+  ],
+  "unsafe": {
+    "bindings": [
+      {
+        "name": "RATE_LIMITER",
+        "type": "ratelimit",
+        "namespace_id": "1001",
+        "simple": {
+          "limit": 10,
+          "period": 60
+        }
+      }
+    ]
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "ISSUER_URL": "https://mcpx.harrykrauze.com",
+    "RESOURCE_ID": "https://mcpx.harrykrauze.com/mcp/sse"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

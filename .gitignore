@@ -7,4 +7,9 @@ dist/
 Thumbs.db
 MCP-Server-Generator/
 test-output/
-
+sandbox/
+.wrangler/
+.antigravity/*
+!.antigravity/rules.md
+.vscode/
+bun.lock

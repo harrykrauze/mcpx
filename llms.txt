@@ -1,0 +1,30 @@
+# mcpx — Model Context Protocol Gateway & Generation Engine
+
+> High-performance, deterministic Model Context Protocol (MCP) server generator and secure remote SSE execution gateway.
+
+## Overview
+- **Domain:** `https://mcpx.harrykrauze.com`
+- **Protocol:** Model Context Protocol (MCP 2024-11-05+), RFC 9728 (OAuth Protected Resource Metadata), RFC 8414 (OAuth Authorization Server Metadata), RFC 7591 (Dynamic Client Registration).
+- **Core Engine:** TypeScript 5.8 / 7.0, Gemini 2.5 / 3.8 Flash, Node.js / Cloudflare Workers runtime.
+- **Security Posture:** Strict SSRF blocking (RFC 1918, Link-local, Cloud metadata, Loopback, IPv6 ULA/Link-local), Origin lock, Rate limiting (10 req/min), Zero-trust token validation (iss, aud, exp with 30s clock skew).
+
+## Discovery & OAuth 2.1 Endpoints
+- `GET /.well-known/oauth-protected-resource`: RFC 9728 resource metadata pointing to SSE endpoint and authorization servers.
+- `GET /.well-known/oauth-authorization-server`: RFC 8414 server metadata with grant types, token endpoints, and supported scopes.
+- `GET /.well-known/jwks.json`: RFC 7517 JSON Web Key Set endpoint.
+- `GET /health`: Public health check with system uptime and provider status.
+- `GET /llms.txt`: This machine-readable specification.
+
+## Core Services
+- `POST /api/generate`: Protected MCP server code generation from OpenAPI specs, cURL snippets, or JSON schemas.
+  - Required Header: `Authorization: Bearer <JWT>` or `X-API-Key: <SCOPED_KEY>`
+  - Required Scope: `mcp:generate`
+  - Rate Limit: 10 req/min (HTTP 429 with `Retry-After: 60`)
+- `GET /mcp/sse`: Remote MCP Server-Sent Events stream for agent connections.
+  - Required Scope: `mcp:connect`
+  - Headers: `X-Accel-Buffering: no`, `Cache-Control: no-cache, no-transform`
+- `POST /mcp/messages?sessionId={id}`: Remote MCP JSON-RPC message delivery with tenant isolation.
+
+## Tool Capabilities
+- `generate_mcp_server`: Transforms API snippets into executable TypeScript (@modelcontextprotocol/sdk) or Python (FastMCP with stateless_http=True) MCP servers.
+- `evaluate_fraud_transaction`: Real-time risk scoring and transaction policy evaluation tool.

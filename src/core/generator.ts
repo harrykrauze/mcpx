@@ -23,9 +23,12 @@ Your sole responsibility is to convert user-supplied API snippets (cURL commands
    - TypeScript target: Strict Zod schemas (\`z.object({...})\`) for all tool input parameters and responses.
      Use standard modern @modelcontextprotocol/sdk patterns (e.g. Server, StdioServerTransport, ListToolsRequestSchema, CallToolRequestSchema).
      Format Zod validation errors strictly using \`parseResult.error.message\` (avoid deprecated or untyped \`.errors\` property).
-   - Python target: FastMCP (\`from mcp.server.fastmcp import FastMCP\`) or standard \`mcp.server\` with Pydantic (\`BaseModel\`) validation models.
-3. Security & Error Handling:
+   - Python target: FastMCP (\`from mcp.server.fastmcp import FastMCP\`) with \`stateless_http=True\` or standard \`mcp.server\` with Pydantic (\`BaseModel\`) validation models.
+3. Security, SSRF & Error Handling:
    - Never hardcode secrets, tokens, or bearer headers in generated code. Always extract them into environment variables (e.g., \`process.env.API_KEY\` or \`os.getenv("API_KEY")\`).
+   - Implement strict SSRF prevention: Validate target protocol (HTTPS only, HTTP allowed strictly for localhost/127.0.0.1 in local dev). Block private subnets (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, 0.0.0.0/8, 169.254.169.254, and IPv6 equivalents ::1, fc00::/7, fe80::/10).
+   - Origin Lock: Never attach \`Authorization\` headers to untrusted or dynamic origins; attach secrets ONLY when destination matches the intended trusted API origin.
+   - Redirect Safety: Disable automatic redirects (\`redirect: 'manual'\` in fetch, \`follow_redirects=False\` in httpx).
    - Implement comprehensive try-catch wrappers around network calls and return structured errors to the agent with \`isError: true\`.
    - Prevent command and prompt injection vectors by strictly validating input schema boundaries.
 4. Output Integrity:
@@ -85,11 +88,155 @@ export function getGeminiClient(): GoogleGenAI | null {
   });
 }
 
+/**
+ * Pārbauda, vai hostdators/IP adrese pieder privātajiem tīkliem, lokālajām adresēm,
+ * mākoņpakalpojumu metadatiem vai aizliegtajiem diapazoniem (SSRF aizsardzība).
+ */
+export function isPrivateOrBlockedHost(hostname: string, allowLocalhost = false): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').trim().toLowerCase();
+
+  if (host === 'localhost' || host === 'metadata.google.internal' || host === 'instance-data') {
+    return !allowLocalhost;
+  }
+
+  // IPv6 pārbaudes
+  if (host === '::1' || host === '::' || host === '0:0:0:0:0:0:0:1' || host === '0:0:0:0:0:0:0:0') {
+    return !allowLocalhost;
+  }
+  // fc00::/7 (Unique Local Address) vai fe80::/10 (Link-Local)
+  if (host.startsWith('fc') || host.startsWith('fd') || /^fe[89ab]/i.test(host)) {
+    return true;
+  }
+
+  // IPv4-kartēts IPv6 (::ffff:127.0.0.1 vai ::ffff:a9fe:a9fe)
+  if (host.startsWith('::ffff:')) {
+    const rest = host.slice(7);
+    if (rest.includes(':')) {
+      const p = rest.split(':');
+      if (p.length === 2) {
+        const high = parseInt(p[0], 16);
+        const low = parseInt(p[1], 16);
+        if (!isNaN(high) && !isNaN(low)) {
+          const a = (high >>> 8) & 255;
+          const b = high & 255;
+          if (a === 0) return true;
+          if (a === 127) return !allowLocalhost;
+          if (a === 10) return true;
+          if (a === 172 && b >= 16 && b <= 31) return true;
+          if (a === 192 && b === 168) return true;
+          if (a === 169 && b === 254) return true;
+          return false;
+        }
+      }
+    }
+  }
+
+  // IPv4 vai IPv4-kartēts IPv6 (::ffff:127.0.0.1)
+  let ipv4 = host;
+  if (host.startsWith('::ffff:')) {
+    ipv4 = host.slice(7);
+  }
+
+  // Pārbauda heksadecimālo DWORD (piemēram 0x7f000001 vai 0xa9fea9fe)
+  if (/^0x[0-9a-f]+$/i.test(ipv4)) {
+    const num = parseInt(ipv4, 16);
+    if (!isNaN(num) && num >= 0 && num <= 4294967295) {
+      const a = (num >>> 24) & 255;
+      const b = (num >>> 16) & 255;
+      if (a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) {
+        return true;
+      }
+    }
+  }
+
+  // Pārbauda decimālo skaitļu notāciju (piemēram, 2130706433 vai 2852039166)
+  if (/^\d+$/.test(ipv4)) {
+    const num = parseInt(ipv4, 10);
+    if (!isNaN(num) && num >= 0 && num <= 4294967295) {
+      const a = (num >>> 24) & 255;
+      const b = (num >>> 16) & 255;
+      if (a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) {
+        return true;
+      }
+    }
+  }
+
+  // Pārbauda punktēto notāciju (tostarp oktālos 0177.0.0.1 vai heksa 0x7f.0.0.1 oktetus)
+  const parts = ipv4.split('.');
+  if (parts.length === 4) {
+    const parsedParts = parts.map((p) => {
+      if (/^0x[0-9a-f]+$/i.test(p)) return parseInt(p, 16);
+      if (/^0\d+$/.test(p)) return parseInt(p, 8);
+      if (/^\d+$/.test(p)) return parseInt(p, 10);
+      return NaN;
+    });
+
+    if (!parsedParts.some(isNaN) && parsedParts.every((n) => n >= 0 && n <= 255)) {
+      const [a, b] = parsedParts;
+      if (a === 0) return true;
+      if (a === 127) return !allowLocalhost;
+      if (a === 10) return true;
+      if (a === 172 && b >= 16 && b <= 31) return true;
+      if (a === 192 && b === 168) return true;
+      if (a === 169 && b === 254) return true;
+      return false;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Validē URL protokolu, SSRF ierobežojumus un uzticamās izcelsmes (origin) atbilstību.
+ */
+export function validateSafeUrl(
+  rawUrl: string,
+  expectedOrigin?: string,
+  options?: { allowLocalhost?: boolean }
+): { valid: boolean; error?: string; url?: URL; isTrustedOrigin?: boolean } {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch (err: any) {
+    return { valid: false, error: `Nederīgs URL formāts: ${err?.message || rawUrl}` };
+  }
+
+  const allowLocal = options?.allowLocalhost ?? (process.env.ALLOW_LOCAL_TARGETS === 'true');
+  const isLocalHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLocalHost && allowLocal)) {
+    return {
+      valid: false,
+      error: `Protokols '${parsed.protocol}' ir aizliegts. Atļauts tikai HTTPS (vai HTTP lokālajai izstrādei uz localhost/127.0.0.1).`,
+    };
+  }
+
+  if (isPrivateOrBlockedHost(parsed.hostname, allowLocal)) {
+    return {
+      valid: false,
+      error: `Piekļuve privātajai vai bloķētajai adresei '${parsed.hostname}' ir liegta (SSRF aizsardzība).`,
+    };
+  }
+
+  let isTrustedOrigin = false;
+  if (expectedOrigin) {
+    try {
+      const exp = new URL(expectedOrigin);
+      isTrustedOrigin = parsed.origin === exp.origin;
+    } catch {
+      isTrustedOrigin = false;
+    }
+  }
+
+  return { valid: true, url: parsed, isTrustedOrigin };
+}
+
 // Deterministic generator fallback if API key is not supplied or model quota reached
 export function generateDeterministicFallback(
   inputSnippet: string,
   language: McpLanguage = 'typescript',
-  serverName = 'mcp-server'
+  serverName = 'mcp-server',
+  transport: 'stdio' | 'sse' = 'stdio'
 ): McpServerResponse {
   const isPython = language === 'python';
   const cleanServerName =
@@ -102,6 +249,12 @@ export function generateDeterministicFallback(
   // Try to find url
   const urlMatch = inputSnippet.match(/https?:\/\/[^\s"']+/);
   const targetUrl = urlMatch ? urlMatch[0] : 'https://api.example.com/v1/action';
+  let targetOrigin = 'https://api.example.com';
+  try {
+    targetOrigin = new URL(targetUrl).origin;
+  } catch {
+    targetOrigin = 'https://api.example.com';
+  }
 
   // Try to extract auth header name
   const hasBearer = /Bearer\s+([^\s"']+)/i.test(inputSnippet) || /Authorization/i.test(inputSnippet);
@@ -123,6 +276,78 @@ import { z } from "zod";
 const API_KEY = process.env.${envVarName};
 if (!API_KEY) {
   console.error("Warning: ${envVarName} is not set in environment variables.");
+}
+
+const ALLOWED_ORIGIN = "${targetOrigin}";
+
+// SSRF & Security Validation Functions
+function isPrivateOrBlockedHost(hostname: string, allowLocalhost = false): boolean {
+  const host = hostname.replace(/^\\[|\\]$/g, '').trim().toLowerCase();
+  if (host === 'localhost' || host === 'metadata.google.internal' || host === 'instance-data') {
+    return !allowLocalhost;
+  }
+  if (host === '::1' || host === '::' || host === '0:0:0:0:0:0:0:1' || host === '0:0:0:0:0:0:0:0') {
+    return !allowLocalhost;
+  }
+  if (host.startsWith('fc') || host.startsWith('fd') || /^fe[89ab]/i.test(host)) {
+    return true;
+  }
+  let ipv4 = host;
+  if (host.startsWith('::ffff:')) {
+    ipv4 = host.slice(7);
+  }
+  const ipv4Match = ipv4.match(/^(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})$/);
+  if (ipv4Match) {
+    const a = parseInt(ipv4Match[1], 10);
+    const b = parseInt(ipv4Match[2], 10);
+    const c = parseInt(ipv4Match[3], 10);
+    const d = parseInt(ipv4Match[4], 10);
+    if (a > 255 || b > 255 || c > 255 || d > 255) return true;
+    if (a === 0) return true;
+    if (a === 127) return !allowLocalhost;
+    if (a === 10) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;
+    return false;
+  }
+  if (/^\\d+$/.test(host)) {
+    const num = parseInt(host, 10);
+    if (!isNaN(num) && num >= 0 && num <= 4294967295) {
+      const a = (num >>> 24) & 255;
+      const b = (num >>> 16) & 255;
+      if (a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function validateSafeUrl(rawUrl: string, expectedOrigin?: string): { valid: boolean; error?: string; url?: URL; isTrustedOrigin?: boolean } {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch (err: any) {
+    return { valid: false, error: \`Invalid URL: \${err?.message || rawUrl}\` };
+  }
+  const isLocalDev = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+  if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLocalDev)) {
+    return { valid: false, error: \`Protocol '\${parsed.protocol}' is prohibited. Only HTTPS is allowed (HTTP allowed strictly for localhost development).\` };
+  }
+  if (isPrivateOrBlockedHost(parsed.hostname, isLocalDev)) {
+    return { valid: false, error: \`Access to private or blocked host '\${parsed.hostname}' is prohibited (SSRF prevention).\` };
+  }
+  let isTrustedOrigin = false;
+  if (expectedOrigin) {
+    try {
+      const exp = new URL(expectedOrigin);
+      isTrustedOrigin = parsed.origin === exp.origin;
+    } catch {
+      isTrustedOrigin = false;
+    }
+  }
+  return { valid: true, url: parsed, isTrustedOrigin };
 }
 
 // Tool Input Schema
@@ -211,6 +436,22 @@ class ${cleanServerName.split('-').map((s) => s.charAt(0).toUpperCase() + s.slic
 
       const input: ExecuteApiInput = parseResult.data;
 
+      // Validate URL against SSRF and private networks
+      const urlCheck = validateSafeUrl(input.endpoint, ALLOWED_ORIGIN);
+      if (!urlCheck.valid || !urlCheck.url) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: \`SSRF Security Error: \${urlCheck.error}\`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const url = urlCheck.url;
+
       try {
         const headers: Record<string, string> = {
           "Content-Type": "application/json",
@@ -218,11 +459,11 @@ class ${cleanServerName.split('-').map((s) => s.charAt(0).toUpperCase() + s.slic
           "User-Agent": "${cleanServerName}/1.0.0",
         };
 
-        if (process.env.${envVarName}) {
+        // Security: Attach Authorization header ONLY if the target matches the trusted origin
+        if (process.env.${envVarName} && urlCheck.isTrustedOrigin) {
           headers["Authorization"] = \`Bearer \${process.env.${envVarName}}\`;
         }
 
-        const url = new URL(input.endpoint);
         if (input.query) {
           Object.entries(input.query).forEach(([k, v]) => {
             url.searchParams.append(k, String(v));
@@ -233,7 +474,22 @@ class ${cleanServerName.split('-').map((s) => s.charAt(0).toUpperCase() + s.slic
           method: "${method}",
           headers,
           body: "${method}" !== "GET" && input.payload ? JSON.stringify(input.payload) : undefined,
+          redirect: "manual",
         });
+
+        // Block automatic redirects to prevent SSRF bypass
+        if (response.status >= 300 && response.status < 400) {
+          const redirectLoc = response.headers.get("location") || "unknown";
+          return {
+            content: [
+              {
+                type: "text",
+                text: \`Security Block: HTTP \${response.status} redirect to '\${redirectLoc}' blocked (automatic redirect following disabled).\`,
+              },
+            ],
+            isError: true,
+          };
+        }
 
         const contentType = response.headers.get("content-type") || "";
         const data = contentType.includes("application/json")
@@ -370,17 +626,56 @@ Official Model Context Protocol (MCP) server for interacting with \`${targetUrl}
     const pyCode = `#!/usr/bin/env python3
 import os
 import sys
+import ipaddress
+from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from mcp.server.fastmcp import FastMCP
 
-# Initialize FastMCP Server
-mcp = FastMCP("${cleanServerName}")
+# Initialize FastMCP Server with stateless_http=True for Cursor / Claude Code compatibility
+mcp = FastMCP("${cleanServerName}", stateless_http=True)
 
 API_KEY = os.getenv("${envVarName}")
 if not API_KEY:
     print("Warning: ${envVarName} is not set in environment variables.", file=sys.stderr)
+
+ALLOWED_ORIGIN = "${targetOrigin}"
+
+def is_private_or_blocked_host(host: str, allow_localhost: bool = False) -> bool:
+    host_clean = host.strip("[]").lower()
+    if host_clean in ("localhost", "metadata.google.internal", "instance-data"):
+        return not allow_localhost
+    if host_clean in ("::1", "::", "0:0:0:0:0:0:0:1", "0:0:0:0:0:0:0:0"):
+        return not allow_localhost
+    if host_clean.startswith("fc") or host_clean.startswith("fd") or host_clean.startswith("fe8") or host_clean.startswith("fe9") or host_clean.startswith("fea") or host_clean.startswith("feb"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host_clean)
+        if ip.is_loopback:
+            return not allow_localhost
+        if ip.is_private or ip.is_link_local or ip.is_unspecified or ip.is_reserved:
+            return True
+        return False
+    except ValueError:
+        return False
+
+def validate_safe_url(raw_url: str, expected_origin: str) -> tuple[bool, str, bool]:
+    try:
+        parsed = urlparse(raw_url)
+    except Exception as e:
+        return False, f"Invalid URL format: {str(e)}", False
+    
+    is_local_dev = parsed.hostname in ("localhost", "127.0.0.1")
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and is_local_dev):
+        return False, f"Protocol '{parsed.scheme}' is prohibited. Only HTTPS is allowed (HTTP allowed strictly for localhost development).", False
+    
+    if not parsed.hostname or is_private_or_blocked_host(parsed.hostname, is_local_dev):
+        return False, f"Access to private or blocked host '{parsed.hostname}' is prohibited (SSRF prevention).", False
+        
+    actual_origin = f"{parsed.scheme}://{parsed.netloc}"
+    is_trusted = (actual_origin == expected_origin)
+    return True, "", is_trusted
 
 class ApiPayload(BaseModel):
     endpoint: str = Field(default="${targetUrl}", description="Target API endpoint URL")
@@ -389,17 +684,22 @@ class ApiPayload(BaseModel):
 
 @mcp.tool()
 async def execute_request(endpoint: str = "${targetUrl}", payload: Optional[Dict[str, Any]] = None, query: Optional[Dict[str, str]] = None) -> str:
-    """Execute validated HTTP request to ${targetUrl}."""
+    """Execute validated HTTP request to ${targetUrl} with strict SSRF protection."""
+    valid, err_msg, is_trusted = validate_safe_url(endpoint, ALLOWED_ORIGIN)
+    if not valid:
+        return f"SSRF Security Error: {err_msg}"
+
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": "${cleanServerName}/1.0.0"
     }
     
-    if API_KEY:
+    # Attach API key ONLY if destination matches trusted origin
+    if API_KEY and is_trusted:
         headers["Authorization"] = f"Bearer {API_KEY}"
         
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
         try:
             response = await client.request(
                 method="${method}",
@@ -408,6 +708,8 @@ async def execute_request(endpoint: str = "${targetUrl}", payload: Optional[Dict
                 json=payload if "${method}" != "GET" else None,
                 params=query
             )
+            if response.is_redirect:
+                return f"Security Block: HTTP {response.status_code} redirect blocked (automatic redirect following disabled)."
             response.raise_for_status()
             return response.text
         except httpx.HTTPStatusError as e:
@@ -505,7 +807,7 @@ export async function generateMcpServer(options: GenerateOptions): Promise<McpSe
   // If Gemini client is not configured, return deterministic fallback directly
   if (!ai) {
     logger.log('[MCP Generator] GEMINI_API_KEY not configured, using deterministic engine fallback');
-    const fallback = generateDeterministicFallback(inputSnippet, language, serverName);
+    const fallback = generateDeterministicFallback(inputSnippet, language, serverName, transport);
     return { ...fallback, generatedBy: 'deterministic-engine' };
   }
 
@@ -524,11 +826,12 @@ ${inputSnippet.trim()}
 Remember to:
 1. Extract any tokens/auth into environment variables (never hardcode values).
 2. Generate strict ${language === 'typescript' ? 'Zod schemas (z.object)' : 'Pydantic BaseModel / typed FastMCP arguments'}.
-3. Wrap network calls with proper error handling and response formatting with isError: true on failure.
-4. Provide complete, executable code without any placeholders or TODOs.
-5. Provide realistic package.json or requirements.txt with pinned/standard versions.
-6. Provide exact mcp_config.json for Claude Desktop / Cursor.
-7. Return raw JSON matching the required schema.`;
+3. Implement strict SSRF prevention: lock API keys to target origin and block private/link-local/metadata IPs.
+4. Wrap network calls with proper error handling and response formatting with isError: true on failure.
+5. Provide complete, executable code without any placeholders or TODOs.
+6. Provide realistic package.json or requirements.txt with pinned/standard versions.
+7. Provide exact mcp_config.json for Claude Desktop / Cursor.
+8. Return raw JSON matching the required schema.`;
 
     const candidateModels = ['gemini-3.8-flash', 'gemini-2.5-flash'];
     let lastError: any = null;
@@ -568,7 +871,7 @@ Remember to:
     }
 
     logger.warn('[MCP Generator] Falling back to deterministic engine due to Gemini failure:', lastError?.message);
-    const fallback = generateDeterministicFallback(inputSnippet, language, serverName);
+    const fallback = generateDeterministicFallback(inputSnippet, language, serverName, transport);
     return {
       ...fallback,
       generatedBy: 'deterministic-engine (AI fallback)',
@@ -576,7 +879,7 @@ Remember to:
     };
   } catch (error: any) {
     logger.error('[MCP Generator Error]', error);
-    const fallback = generateDeterministicFallback(inputSnippet, language, serverName);
+    const fallback = generateDeterministicFallback(inputSnippet, language, serverName, transport);
     return {
       ...fallback,
       generatedBy: 'deterministic-engine (error fallback)',
