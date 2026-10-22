@@ -3,6 +3,7 @@ import {
   validateMasterAuth,
   recordUsage,
   generateApiKey,
+  computeKeyId,
   ApiKeyRecord,
   ProvisionKeyPayload,
   Env,
@@ -241,7 +242,9 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         }
 
         const newApiKey = generateApiKey();
+        const keyId = await computeKeyId(newApiKey);
         const record: ApiKeyRecord = {
+          keyId,
           userId: tenantId,
           tenantId,
           description,
@@ -255,10 +258,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         };
 
         await env.MCPX_KEYS.put(`key:${newApiKey}`, JSON.stringify(record));
+        await env.MCPX_KEYS.put(`id:${keyId}`, newApiKey);
 
         return new Response(
           JSON.stringify({
             success: true,
+            keyId: record.keyId,
             apiKey: newApiKey,
             tenantId: record.tenantId,
             userId: record.userId,
@@ -280,6 +285,226 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         return new Response(
           JSON.stringify({ error: "Bad Request: Invalid JSON body.", details: err?.message }),
           { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+      }
+    }
+
+    // Atslēgu inventarizācija un saraksts administratoram (GET /keys)
+    if (url.pathname === "/keys" && request.method === "GET") {
+      // 1. Ātruma ierobežotājs (Rate limit 10 req/min)
+      if (env.RATE_LIMITER) {
+        const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
+        const { success } = await env.RATE_LIMITER.limit({ key: `list:${clientIp}` });
+        if (!success) {
+          return new Response(
+            JSON.stringify({ error: "Too Many Requests: Rate limit exceeded." }),
+            { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "60", ...CORS_HEADERS } }
+          );
+        }
+      }
+
+      // 2. Master administratora autorizācija
+      const masterAuth = await validateMasterAuth(request, env);
+      if (!masterAuth.authorized) {
+        const headers = new Headers(masterAuth.response.headers);
+        for (const [k, v] of Object.entries(CORS_HEADERS)) {
+          headers.set(k, v);
+        }
+        return new Response(masterAuth.response.body, {
+          status: masterAuth.response.status,
+          headers,
+        });
+      }
+
+      if (!env.MCPX_KEYS) {
+        return new Response(
+          JSON.stringify({ error: "Storage not configured." }),
+          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+      }
+
+      try {
+        const statusFilter = url.searchParams.get("status")?.trim().toLowerCase();
+        const listRes = await env.MCPX_KEYS.list({ prefix: "key:" });
+        const keysList: any[] = [];
+
+        for (const k of listRes.keys) {
+          const rawKey = k.name.slice(4); // Noņem "key:" prefiksu
+          const rawRecord = await env.MCPX_KEYS.get(k.name, "text");
+          if (!rawRecord) continue;
+
+          try {
+            const cleaned = rawRecord.replace(/^\uFEFF/, "").trim();
+            const record = JSON.parse(cleaned) as ApiKeyRecord;
+            if (statusFilter && record.status !== statusFilter) {
+              continue;
+            }
+
+            const keyId = record.keyId || (await computeKeyId(rawKey));
+            const maskedKey = rawKey.length > 14
+              ? `${rawKey.slice(0, 10)}...${rawKey.slice(-4)}`
+              : "mcpx_live_...";
+
+            keysList.push({
+              keyId,
+              maskedKey,
+              tenantId: record.tenantId || record.userId,
+              description: record.description ?? null,
+              plan: record.plan,
+              status: record.status,
+              rateLimit: record.rateLimit || 10,
+              scopes: record.scopes || ["mcp:read", "mcp:write", "mcp:generate"],
+              createdAt: record.createdAt || null,
+              expiresAt: record.expiresAt || null,
+              revokedAt: record.revokedAt || null,
+            });
+          } catch {
+            // Ignorē atsevišķu bojātu ierakstu
+          }
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            total: keysList.length,
+            keys: keysList,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+      } catch (err: any) {
+        return new Response(
+          JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
+          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+      }
+    }
+
+    // Atslēgas tūlītēja atsaukšana (DELETE /keys/:keyId vai POST /keys/revoke)
+    if (
+      (request.method === "DELETE" && url.pathname.startsWith("/keys/")) ||
+      (url.pathname === "/keys/revoke" && request.method === "POST")
+    ) {
+      // 1. Ātruma ierobežotājs
+      if (env.RATE_LIMITER) {
+        const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
+        const { success } = await env.RATE_LIMITER.limit({ key: `del:${clientIp}` });
+        if (!success) {
+          return new Response(
+            JSON.stringify({ error: "Too Many Requests: Rate limit exceeded." }),
+            { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "60", ...CORS_HEADERS } }
+          );
+        }
+      }
+
+      // 2. Master administratora autorizācija
+      const masterAuth = await validateMasterAuth(request, env);
+      if (!masterAuth.authorized) {
+        const headers = new Headers(masterAuth.response.headers);
+        for (const [k, v] of Object.entries(CORS_HEADERS)) {
+          headers.set(k, v);
+        }
+        return new Response(masterAuth.response.body, {
+          status: masterAuth.response.status,
+          headers,
+        });
+      }
+
+      if (!env.MCPX_KEYS) {
+        return new Response(
+          JSON.stringify({ error: "Storage not configured." }),
+          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+      }
+
+      try {
+        let targetIdentifier = "";
+
+        if (request.method === "DELETE") {
+          targetIdentifier = url.pathname.replace(/^\/keys\/?/, "").trim();
+        } else {
+          const payload = ((await request.json().catch(() => ({}))) || {}) as {
+            keyId?: string;
+            apiKey?: string;
+          };
+          targetIdentifier = (payload.keyId || payload.apiKey || "").trim();
+        }
+
+        if (!targetIdentifier) {
+          return new Response(
+            JSON.stringify({ error: "Bad Request: 'keyId' or 'apiKey' is required." }),
+            { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          );
+        }
+
+        // Meklējam atslēgu KV krātuvē:
+        // A variants: tiešā atslēga `key:<targetIdentifier>`
+        let actualKey = targetIdentifier;
+        let rawRecord = await env.MCPX_KEYS.get(`key:${targetIdentifier}`, "text");
+
+        // B variants: rādītājs pēc `id:<targetIdentifier>`
+        if (!rawRecord) {
+          const resolvedKey = await env.MCPX_KEYS.get(`id:${targetIdentifier}`, "text");
+          if (resolvedKey) {
+            actualKey = resolvedKey.trim();
+            rawRecord = await env.MCPX_KEYS.get(`key:${actualKey}`, "text");
+          }
+        }
+
+        // C variants: skenējam pēc `record.keyId`
+        if (!rawRecord) {
+          const listRes = await env.MCPX_KEYS.list({ prefix: "key:" });
+          for (const k of listRes.keys) {
+            const candidateRaw = await env.MCPX_KEYS.get(k.name, "text");
+            if (candidateRaw) {
+              try {
+                const candRecord = JSON.parse(candidateRaw.replace(/^\uFEFF/, "").trim()) as ApiKeyRecord;
+                const computedId = candRecord.keyId || (await computeKeyId(k.name.slice(4)));
+                if (candRecord.keyId === targetIdentifier || computedId === targetIdentifier) {
+                  actualKey = k.name.slice(4);
+                  rawRecord = candidateRaw;
+                  break;
+                }
+              } catch {
+                // Turpināt meklēšanu
+              }
+            }
+          }
+        }
+
+        if (!rawRecord) {
+          return new Response(
+            JSON.stringify({ error: "Not Found: API key or keyId not found." }),
+            { status: 404, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          );
+        }
+
+        const cleaned = rawRecord.replace(/^\uFEFF/, "").trim();
+        const record = JSON.parse(cleaned) as ApiKeyRecord;
+        const nowIso = new Date().toISOString();
+
+        record.status = "revoked";
+        record.revokedAt = nowIso;
+        record.expiresAt = nowIso;
+
+        await env.MCPX_KEYS.put(`key:${actualKey}`, JSON.stringify(record));
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            keyId: record.keyId || targetIdentifier,
+            status: "revoked",
+            revokedAt: record.revokedAt,
+            message: "API key successfully revoked.",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          }
+        );
+      } catch (err: any) {
+        return new Response(
+          JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
+          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
         );
       }
     }
@@ -321,75 +546,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       );
     }
 
-    // Atslēgas atsaukšana ar Master atslēgu (POST /keys/revoke)
-    if (url.pathname === "/keys/revoke") {
-      if (request.method !== "POST") {
-        return new Response(JSON.stringify({ error: "Method Not Allowed. Use POST." }), {
-          status: 405,
-          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-        });
-      }
 
-      const authHeader = request.headers.get("Authorization");
-      const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
-
-      if (!env.MCPX_API_KEY || token !== env.MCPX_API_KEY) {
-        return new Response(
-          JSON.stringify({ error: "Forbidden: Master admin key required to revoke keys." }),
-          { status: 403, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
-        );
-      }
-
-      if (!env.MCPX_KEYS) {
-        return new Response(
-          JSON.stringify({ error: "Storage not configured." }),
-          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
-        );
-      }
-
-      try {
-        const payload = (await request.json()) as { apiKey?: string };
-        if (!payload.apiKey || typeof payload.apiKey !== "string") {
-          return new Response(
-            JSON.stringify({ error: "Bad Request: 'apiKey' (string) is required." }),
-            { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
-          );
-        }
-
-        const targetKey = payload.apiKey.trim();
-        const rawRecord = await env.MCPX_KEYS.get(`key:${targetKey}`, "text");
-        if (!rawRecord) {
-          return new Response(
-            JSON.stringify({ error: "Not Found: API key not found." }),
-            { status: 404, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
-          );
-        }
-
-        const cleaned = rawRecord.replace(/^\uFEFF/, "").trim();
-        const record = JSON.parse(cleaned) as ApiKeyRecord;
-        record.status = "revoked";
-
-        await env.MCPX_KEYS.put(`key:${targetKey}`, JSON.stringify(record));
-
-        return new Response(
-          JSON.stringify({
-            success: true,
-            apiKey: targetKey,
-            userId: record.userId,
-            status: "revoked",
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-          }
-        );
-      } catch (err: any) {
-        return new Response(
-          JSON.stringify({ error: "Bad Request: Invalid JSON body.", details: err?.message }),
-          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
-        );
-      }
-    }
 
     // SSE plūsmas ceļš (/sse un /mcp/sse)
     if ((url.pathname === "/sse" || url.pathname === "/mcp/sse") && request.method === "GET") {

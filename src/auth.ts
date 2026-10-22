@@ -10,6 +10,7 @@ export interface ProvisionKeyPayload {
 }
 
 export interface ApiKeyRecord {
+  keyId?: string;
   userId: string;
   tenantId?: string;
   description?: string;
@@ -20,6 +21,7 @@ export interface ApiKeyRecord {
   scopes?: string[];
   createdAt?: string;
   expiresAt?: string;
+  revokedAt?: string;
 }
 
 export interface KVNamespace {
@@ -27,6 +29,11 @@ export interface KVNamespace {
   get<ExpectedValue = unknown>(key: string, type: "json"): Promise<ExpectedValue | null>;
   put(key: string, value: string, options?: { expiration?: number; expirationTtl?: number; metadata?: any }): Promise<void>;
   delete(key: string): Promise<void>;
+  list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<{
+    keys: Array<{ name: string; expiration?: number; metadata?: any }>;
+    list_complete: boolean;
+    cursor?: string;
+  }>;
 }
 
 export interface Env {
@@ -62,6 +69,13 @@ export function generateApiKey(): string {
   return `mcpx_live_${hex}`;
 }
 
+export async function computeKeyId(apiKey: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const hashBuf = await crypto.subtle.digest("SHA-256", encoder.encode(apiKey));
+  const hashHex = Array.from(new Uint8Array(hashBuf), (b) => b.toString(16).padStart(2, "0")).join("");
+  return `key_${hashHex.slice(0, 12)}`;
+}
+
 /**
  * Konstanta laika virkņu salīdzināšana ar SHA-256 hešēšanu Web Crypto līmenī.
  * Novērš laika mērīšanas uzbrukumus (timing attacks) un garuma noplūdi (length leak).
@@ -80,7 +94,7 @@ export async function timingSafeStringEqual(a: string, b: string): Promise<boole
 }
 
 /**
- * Stingra administratora autorizācijas pārbaude maršrutam POST /keys/provision.
+ * Stingra administratora autorizācijas pārbaude maršrutiem /keys, /keys/provision, /keys/:keyId.
  * Pieprasa Authorization: Bearer <MCPX_MASTER_KEY> vai X-Master-Key galveni.
  */
 export async function validateMasterAuth(
@@ -145,31 +159,52 @@ export async function validateMasterAuth(
     }
   }
 
-  // 3. Pārbaude: vai tā ir derīga parasta nomnieka API atslēga no KV krātuves?
+  // 3. Pārbaude: vai tā ir nomnieka API atslēga no KV krātuves?
   if (env.MCPX_KEYS) {
     try {
       const rawRecord = await env.MCPX_KEYS.get(`key:${token}`, "text");
       if (rawRecord) {
         const cleaned = rawRecord.replace(/^\uFEFF/, "").trim();
         const record = JSON.parse(cleaned) as ApiKeyRecord;
-        if (record && record.status === "active") {
-          // Nomnieks ir autentificēts, bet tam NAV administratora tiesību -> 403 Forbidden
-          return {
-            authorized: false,
-            response: new Response(
-              JSON.stringify({
-                error: "Forbidden: Insufficient scope. Master admin privileges required.",
-                resource_metadata: resourceMetadataUrl,
-              }),
-              {
-                status: 403,
-                headers: {
-                  "Content-Type": "application/json",
-                  "WWW-Authenticate": `Bearer error="insufficient_scope", resource_metadata="${resourceMetadataUrl}"`,
-                },
-              }
-            ),
-          };
+        if (record) {
+          if (record.status === "revoked") {
+            return {
+              authorized: false,
+              response: new Response(
+                JSON.stringify({
+                  error: "Unauthorized: API key has been revoked.",
+                  resource_metadata: resourceMetadataUrl,
+                }),
+                {
+                  status: 401,
+                  headers: {
+                    "Content-Type": "application/json",
+                    "WWW-Authenticate": `Bearer error="token_revoked", resource_metadata="${resourceMetadataUrl}"`,
+                  },
+                }
+              ),
+            };
+          }
+
+          if (record.status === "active") {
+            // Nomnieks ir autentificēts, bet tam NAV administratora tiesību -> 403 Forbidden
+            return {
+              authorized: false,
+              response: new Response(
+                JSON.stringify({
+                  error: "Forbidden: Insufficient scope. Master admin privileges required.",
+                  resource_metadata: resourceMetadataUrl,
+                }),
+                {
+                  status: 403,
+                  headers: {
+                    "Content-Type": "application/json",
+                    "WWW-Authenticate": `Bearer error="insufficient_scope", resource_metadata="${resourceMetadataUrl}"`,
+                  },
+                }
+              ),
+            };
+          }
         }
       }
     } catch {
@@ -270,40 +305,62 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
       if (rawRecord) {
         const cleaned = rawRecord.replace(/^\uFEFF/, "").trim();
         const record = JSON.parse(cleaned) as ApiKeyRecord;
-        if (record && record.status === "active") {
-          // Pārbauda derīguma termiņu, ja norādīts
-          if (record.expiresAt) {
-            const expTime = new Date(record.expiresAt).getTime();
-            if (!isNaN(expTime) && Date.now() > expTime) {
-              return {
-                authorized: false,
-                response: new Response(
-                  JSON.stringify({
-                    error: "Unauthorized: API key has expired.",
-                    resource_metadata: resourceMetadataUrl,
-                  }),
-                  {
-                    status: 401,
-                    headers: {
-                      "Content-Type": "application/json",
-                      "WWW-Authenticate": `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`,
-                    },
-                  }
-                ),
-              };
-            }
+        if (record) {
+          // Pārbauda, vai atslēga ir anulēta (revoked)
+          if (record.status === "revoked") {
+            return {
+              authorized: false,
+              response: new Response(
+                JSON.stringify({
+                  error: "Unauthorized: API key has been revoked.",
+                  resource_metadata: resourceMetadataUrl,
+                }),
+                {
+                  status: 401,
+                  headers: {
+                    "Content-Type": "application/json",
+                    "WWW-Authenticate": `Bearer error="token_revoked", resource_metadata="${resourceMetadataUrl}"`,
+                  },
+                }
+              ),
+            };
           }
 
-          return {
-            authorized: true,
-            context: {
-              userId: record.userId,
-              tenantId: record.tenantId || record.userId,
-              plan: record.plan,
-              requestsLimit: record.requestsLimit,
-              scopes: record.scopes || ["mcp:read", "mcp:write", "mcp:generate"],
-            },
-          };
+          if (record.status === "active") {
+            // Pārbauda derīguma termiņu, ja norādīts
+            if (record.expiresAt) {
+              const expTime = new Date(record.expiresAt).getTime();
+              if (!isNaN(expTime) && Date.now() > expTime) {
+                return {
+                  authorized: false,
+                  response: new Response(
+                    JSON.stringify({
+                      error: "Unauthorized: API key has expired.",
+                      resource_metadata: resourceMetadataUrl,
+                    }),
+                    {
+                      status: 401,
+                      headers: {
+                        "Content-Type": "application/json",
+                        "WWW-Authenticate": `Bearer error="invalid_token", resource_metadata="${resourceMetadataUrl}"`,
+                      },
+                    }
+                  ),
+                };
+              }
+            }
+
+            return {
+              authorized: true,
+              context: {
+                userId: record.userId,
+                tenantId: record.tenantId || record.userId,
+                plan: record.plan,
+                requestsLimit: record.requestsLimit,
+                scopes: record.scopes || ["mcp:read", "mcp:write", "mcp:generate"],
+              },
+            };
+          }
         }
       }
     } catch {
