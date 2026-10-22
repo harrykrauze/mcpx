@@ -28,3 +28,24 @@
 ## Tool Capabilities
 - `generate_mcp_server`: Transforms API snippets into executable TypeScript (@modelcontextprotocol/sdk) or Python (FastMCP with stateless_http=True) MCP servers.
 - `evaluate_fraud_transaction`: Real-time risk scoring and transaction policy evaluation tool.
+
+## Client Integration (Claude Code & Cursor)
+
+### Claude Code (CLI)
+```bash
+claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <MCPX_API_KEY>"
+```
+
+### Cursor IDE (.cursor/mcp.json)
+```json
+{
+  "mcpServers": {
+    "mcpx": {
+      "url": "https://mcpx.harrykrauze.com/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCPX_API_KEY"
+      }
+    }
+  }
+}
+```

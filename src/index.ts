@@ -73,6 +73,27 @@ export default {
 ## Tool Capabilities
 - \`generate_mcp_server\`: Transforms API snippets into executable TypeScript (@modelcontextprotocol/sdk) or Python (FastMCP with stateless_http=True) MCP servers.
 - \`evaluate_fraud_transaction\`: Real-time risk scoring and transaction policy evaluation tool.
+
+## Client Integration (Claude Code & Cursor)
+
+### Claude Code (CLI)
+\`\`\`bash
+claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <MCPX_API_KEY>"
+\`\`\`
+
+### Cursor IDE (.cursor/mcp.json)
+\`\`\`json
+{
+  "mcpServers": {
+    "mcpx": {
+      "url": "https://mcpx.harrykrauze.com/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCPX_API_KEY"
+      }
+    }
+  }
+}
+\`\`\`
 `;
       return new Response(llmsContent, {
         headers: { "Content-Type": "text/markdown; charset=utf-8", ...CORS_HEADERS }
@@ -322,8 +343,8 @@ export default {
       });
     }
 
-    // 2. Apstrādes un koda ģenerēšanas maršruts (/api/generate un /message)
-    if (url.pathname === "/api/generate" || url.pathname === "/message") {
+    // 2. Apstrādes un koda ģenerēšanas maršruts (/api/generate, /message, /mcp/messages)
+    if (url.pathname === "/api/generate" || url.pathname === "/message" || url.pathname === "/mcp/messages") {
       if (request.method !== "POST") {
         return new Response(JSON.stringify({ error: "Method Not Allowed. Use POST." }), {
           status: 405,
@@ -398,13 +419,212 @@ export default {
 
       // 2.4. Pieprasījuma satura nolasīšana un apstrāde
       try {
-        const body = (await request.json()) as {
-          message?: string;
-          input?: string;
-          spec?: string;
-          prompt?: string;
-          inputSnippet?: string;
-        };
+        const body = (await request.json()) as any;
+
+        // Model Context Protocol (MCP) JSON-RPC 2.0 atbalsts
+        if (body && typeof body === "object" && body.jsonrpc === "2.0" && typeof body.method === "string") {
+          const reqId = body.id;
+
+          // MCP Dzīvescikls: initialize
+          if (body.method === "initialize") {
+            return new Response(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: reqId,
+                result: {
+                  protocolVersion: "2024-11-05",
+                  capabilities: {
+                    tools: {
+                      listChanged: false,
+                    },
+                  },
+                  serverInfo: {
+                    name: "mcpx",
+                    version: "1.0.0",
+                  },
+                },
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+              }
+            );
+          }
+
+          // MCP Dzīvescikls: notifications/initialized
+          if (body.method === "notifications/initialized") {
+            return new Response(
+              JSON.stringify({ jsonrpc: "2.0" }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+              }
+            );
+          }
+
+          // MCP Rīku atklāšana: tools/list
+          if (body.method === "tools/list") {
+            return new Response(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: reqId,
+                result: {
+                  tools: [
+                    {
+                      name: "generate_mcp_server",
+                      description: "Transforms API snippets, OpenAPI specs, or cURL commands into executable TypeScript or Python MCP servers.",
+                      inputSchema: {
+                        type: "object",
+                        properties: {
+                          prompt: {
+                            type: "string",
+                            description: "API specification, cURL snippet, or description of the MCP server to generate.",
+                          },
+                        },
+                        required: ["prompt"],
+                      },
+                    },
+                    {
+                      name: "evaluate_fraud_transaction",
+                      description: "Real-time risk scoring and transaction policy evaluation tool.",
+                      inputSchema: {
+                        type: "object",
+                        properties: {
+                          amount: { type: "number", description: "Transaction amount in EUR/USD" },
+                          currency: { type: "string", description: "ISO currency code" },
+                          userRiskScore: { type: "number", description: "User risk score between 0 and 1" },
+                        },
+                        required: ["amount", "currency"],
+                      },
+                    },
+                  ],
+                },
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+              }
+            );
+          }
+
+          // MCP Rīku izpilde: tools/call
+          if (body.method === "tools/call") {
+            const toolName = body.params?.name;
+            const toolArgs = body.params?.arguments || {};
+
+            if (toolName === "generate_mcp_server") {
+              const prompt = toolArgs.prompt || toolArgs.input || toolArgs.spec;
+              if (!prompt || typeof prompt !== "string") {
+                return new Response(
+                  JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: reqId,
+                    error: {
+                      code: -32602,
+                      message: "Invalid params: 'prompt' string argument is required.",
+                    },
+                  }),
+                  { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+                );
+              }
+
+              const result = await generateMcpSpec(prompt, env.GEMINI_API_KEY);
+              ctx.waitUntil(recordUsage(env, userId));
+
+              return new Response(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: reqId,
+                  result: {
+                    content: [
+                      {
+                        type: "text",
+                        text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+                      },
+                    ],
+                  },
+                }),
+                {
+                  status: 200,
+                  headers: {
+                    "Content-Type": "application/json",
+                    "X-MCPX-User": userId,
+                    "X-MCPX-Plan": plan,
+                    ...CORS_HEADERS,
+                  },
+                }
+              );
+            }
+
+            if (toolName === "evaluate_fraud_transaction") {
+              const amount = Number(toolArgs.amount) || 0;
+              const currency = String(toolArgs.currency || "EUR");
+              const userRiskScore = Number(toolArgs.userRiskScore) || 0;
+              const isHighRisk = amount > 5000 || userRiskScore > 0.8;
+
+              return new Response(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: reqId,
+                  result: {
+                    content: [
+                      {
+                        type: "text",
+                        text: JSON.stringify({
+                          decision: isHighRisk ? "MANUAL_REVIEW" : "APPROVE",
+                          riskLevel: isHighRisk ? "HIGH" : "LOW",
+                          amount,
+                          currency,
+                          userRiskScore,
+                          timestamp: new Date().toISOString(),
+                        }, null, 2),
+                      },
+                    ],
+                  },
+                }),
+                {
+                  status: 200,
+                  headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+                }
+              );
+            }
+
+            return new Response(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: reqId,
+                error: {
+                  code: -32601,
+                  message: `Unknown tool: '${toolName}'`,
+                },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            );
+          }
+
+          // MCP Ping
+          if (body.method === "ping") {
+            return new Response(
+              JSON.stringify({ jsonrpc: "2.0", id: reqId, result: {} }),
+              { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            );
+          }
+
+          // Citi neatpazīti JSON-RPC izsaukumi
+          return new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: reqId ?? null,
+              error: {
+                code: -32601,
+                message: `Method '${body.method}' not found.`,
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          );
+        }
+
+        // 2.5. Tradicionālā (legacy) HTTP POST specifikācijas ģenerēšana
         const rawInput = body.prompt || body.inputSnippet || body.message || body.input || body.spec;
 
         if (!rawInput || typeof rawInput !== "string") {
@@ -416,7 +636,7 @@ export default {
 
         const result = await generateMcpSpec(rawInput, env.GEMINI_API_KEY);
 
-        // 2.5. Asinhrona patēriņa uzskaite tikai pēc veiksmīga Gemini izsaukuma
+        // 2.6. Asinhrona patēriņa uzskaite tikai pēc veiksmīga Gemini izsaukuma
         ctx.waitUntil(recordUsage(env, userId));
 
         return new Response(

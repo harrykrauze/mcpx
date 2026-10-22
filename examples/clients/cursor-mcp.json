@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "mcpx": {
+      "url": "https://mcpx.harrykrauze.com/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCPX_API_KEY"
+      }
+    }
+  }
+}

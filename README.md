@@ -62,7 +62,52 @@ Open your browser at `http://localhost:3000`.
 | `npm run build` | Compiles the production frontend bundle into `dist/` |
 | `npm run start` | Runs the production backend with prebuilt assets |
 | `npm run lint` | Runs type verification (`tsc --noEmit`) |
+| `npm run test:client-connection` | Runs live MCP client SSE & tools/list verification against production |
+| `npm run test:live-smoke` | Runs production edge gateway live smoke tests |
 | `npm run clean` | Removes build artifacts (`dist`, `server.js`) |
+
+---
+
+## Klientu Pieslēgšana (Claude Code & Cursor)
+
+`mcpx` nodrošina attālinātu pieslēgumu AI izstrādes aģentiem caur **Model Context Protocol (MCP)** Server-Sent Events (SSE) transportu ar Bearer autorizāciju.
+
+### 1. Claude Code (CLI)
+Pievienojiet `mcpx` serveri tieši caur termināli:
+```bash
+claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <TAVA_MCPX_API_ATSLĒGA>"
+```
+
+Vai pievienojiet projekta `.mcp.json` (vai globālajā `~/.claude.json`):
+```json
+{
+  "mcpServers": {
+    "mcpx": {
+      "url": "https://mcpx.harrykrauze.com/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer ${MCPX_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+### 2. Cursor IDE
+Izveidojiet failu `.cursor/mcp.json` projekta saknē:
+```json
+{
+  "mcpServers": {
+    "mcpx": {
+      "url": "https://mcpx.harrykrauze.com/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCPX_API_KEY"
+      }
+    }
+  }
+}
+```
+
+Gatavi konfigurācijas šabloni un atslēgu provisionēšanas ceļvedis atrodams mapē [`examples/clients/`](examples/clients/README.md).
 
 ---
 

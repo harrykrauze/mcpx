@@ -36,6 +36,7 @@
     "test:security-remediation": "tsx scripts/test-security-remediation.ts",
     "test:smoke": "tsx scripts/test-live-smoke.ts",
     "test:live-smoke": "tsx scripts/test-live-smoke.ts",
+    "test:client-connection": "tsx scripts/test-client-connection.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },
