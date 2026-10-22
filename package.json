@@ -32,8 +32,10 @@
     "test:pipeline": "tsx scripts/test-circuit-breaker.ts",
     "test:gateway": "tsx scripts/test-remote-gateway.ts",
     "test:security": "tsx scripts/test-sandbox-jev.ts",
+    "test:sandbox-escape": "tsx scripts/test-sandbox-escape.ts",
     "test:security-remediation": "tsx scripts/test-security-remediation.ts",
     "test:smoke": "tsx scripts/test-live-smoke.ts",
+    "test:live-smoke": "tsx scripts/test-live-smoke.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },

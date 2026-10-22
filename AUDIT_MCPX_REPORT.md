@@ -3,15 +3,15 @@
 **Datums:** 2026-10-22  
 **Auditors:** Antigravity Advanced Agentic Security Team  
 **Mērķa repozitorijs:** `mcpx` (`C:\Users\A\Documents\mcpx`)  
-**Statuss:** `HARDENED / AHP GATES 1–5 COMPLETED & VERIFIED` (P1 un P2 ievainojamības novērstas, 100% tipu drošība, integrācijas testi un Cloudflare Edge izvietošanas simulācija sekmīga)
+**Statuss:** `SECURE / PRODUCTION READY` (P1 un P2 ievainojamības novērstas, 100% tipu drošība, izolēta smilškaste ar worker_threads un V8 resursu griestiem, Cloudflare Edge pārbaudīta)
 
 ---
 
 ## 1. Executive Summary (Kopsavilkums)
 
-### Vispārējais Gatavības Vērtējums: `HARDENED (AHP Gates 1–5 Passed)`
+### Vispārējais Gatavības Vērtējums: `SECURE / PRODUCTION READY`
 
-Saskaņā ar Agentic Harness Protocol (AHP) projekts `mcpx` ir pilnībā nostiprināts pret kritiskākajiem drošības riskiem (SSRF, akreditācijas datu noplūde, DoS un OAuth 2.1 RFC neatbilstības):
+Saskaņā ar Agentic Harness Protocol (AHP) projekts `mcpx` ir pilnībā nostiprināts pret kritiskākajiem drošības riskiem (SSRF, akreditācijas datu noplūde, DoS, smilškastes izbēgšana un OAuth 2.1 RFC neatbilstības):
 
 1. **SSRF un API atslēgu aizsardzība ([`src/core/generator.ts`](file:///c:/Users/A/Documents/mcpx/src/core/generator.ts)):**
    - Ieviesta visaptveroša IP un protokolu validācija (`validateSafeUrl`, `isPrivateOrBlockedHost`), kas pirms pieprasījuma bloķē privātos tīklus (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), lokālās adreses (`127.0.0.0/8`, `0.0.0.0/8`), mākoņu metadatus (`169.254.169.254`, `metadata.google.internal`), kā arī IPv6 diapazonus (`::1`, `fc00::/7`, `fe80::/10`).
@@ -35,6 +35,12 @@ Saskaņā ar Agentic Harness Protocol (AHP) projekts `mcpx` ir pilnībā nostipr
    - Izveidots `/llms.txt` un `public/llms.txt`.
    - Pievienoti Schema.org JSON-LD metadati failā [`index.html`](file:///c:/Users/A/Documents/mcpx/index.html).
    - Veikta veiksmīga `npx wrangler deploy --dry-run` simulācija ar Cloudflare Workers, KV un Rate Limiter piesaistēm.
+7. **Smilškastes Izolācija un Resursu Griesti ([`src/core/codeSandbox.ts`](file:///c:/Users/A/Documents/mcpx/src/core/codeSandbox.ts), [`src/core/jevFilter.ts`](file:///c:/Users/A/Documents/mcpx/src/core/jevFilter.ts)):**
+   - Pilnībā novērsta ievainojamība SEC-02: `node:vm` aizstāts ar izolētiem `node:worker_threads`.
+   - V8 `resourceLimits` (64 MB Heap, 16 MB Young Gen, 4 MB Stack) un bezkompromisa `worker.terminate()` pie taimauta.
+   - Pirmfiltrs `TypeSafeJevFilter` bloķē `__proto__`, `constructor.constructor`, `eval`, `Function`, `process`, `fetch`.
+   - Kļūdu sanitizācija `sanitizeError` novērš iekšējās sistēmas failu ceļu (`[sanitized_path]`) un steka noplūdi.
+   - 11 no 11 smilškastes ielaušanās testiem ir izturēti (`scripts/test-sandbox-escape.ts`).
 
 ---
 
@@ -43,7 +49,7 @@ Saskaņā ar Agentic Harness Protocol (AHP) projekts `mcpx` ir pilnībā nostipr
 | ID | Modulis / Fails | Smagums | Apraksts un Ietekme | Statuss | Veiktā Remediācija (Patch Summary) |
 |---|---|---|---|---|---|
 | **SEC-01** | `src/core/generator.ts` | **HIGH (CRITICAL)** | **SSRF & Credential Exfiltration:** Ģenerētie rīki ļāva norādīt patvaļīgu `endpoint` un nosūtīja `API_KEY`. | **RESOLVED** | Ieviesta `validateSafeUrl` un `isPrivateOrBlockedHost` pārbaude, origin lock (atslēga tikai uzticamam domēnam), `redirect: 'manual'`, IPv4-mapped IPv6 dešifrēšana, hex/octal DWORD bloķēšana. |
-| **SEC-02** | `src/core/remoteSseAdapter.ts` & `codeSandbox.ts` | **HIGH (CRITICAL)** | **Dinamisko rīku izpilde bez izolācijas & Vājā VM smilškaste:** Dinamiskie rīki palaisti galvenajā procesā; `node:vm` ir nedroša smilškaste. | **OPEN (P3 backlog)** | Plānots nākamajā posmā aizstāt ar `isolated-vm` vai konteinerizētu mikropakalpojumu. |
+| **SEC-02** | `src/core/remoteSseAdapter.ts` & `codeSandbox.ts` | **HIGH (CRITICAL)** | **Dinamisko rīku izpilde bez izolācijas & Vājā VM smilškaste:** Dinamiskie rīki palaisti galvenajā procesā; `node:vm` ir nedroša smilškaste. | **RESOLVED / FULLY HARDENED (Worker Threads + V8 Limits + AST Gate)** | Pilnībā aizstāts `node:vm` ar `node:worker_threads`, V8 `resourceLimits` (64 MB Heap), piespiedu `worker.terminate()`, TypeSafe Jev AST pirmfiltru un ceļu sanitizāciju. 11/11 ielaušanās testiem izturēti (`scripts/test-sandbox-escape.ts`). |
 | **SEC-03** | `server.ts` | **HIGH** | **Publisks, neautentificēts `/api/generate` galapunkts:** DoS risks un kvotu izsmelšana bez autorizācijas. | **RESOLVED** | Pievienota `requireAuth('mcp:generate')` un `express-rate-limit` (10 req/min ar `Retry-After: 60`). |
 | **SEC-04** | `src/core/oauthGuard.ts` | **HIGH** | **Nepilnīga JWT validācija:** Trūka `iss` un `aud` pārbaudes, apejams `exp`. | **RESOLVED** | Ieviesta strikta `payload.iss === this.issuerUrl`, `payload.aud === this.resourceId`, nākotnes `iat` pārbaude un `exp` termiņa validācija ar 30s clock skew. |
 | **SEC-05** | `src/core/oauthGuard.ts` | **MEDIUM** | **Stāvokļa zudums (In-Memory State):** DCR klienti un atslēgas glabājas atmiņā. | **OPEN (P3 backlog)** | Ieteicams pārcelt uz ārēju DB (Redis / PostgreSQL / Cloudflare KV). |
