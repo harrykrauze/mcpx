@@ -37,6 +37,8 @@
     "test:smoke": "tsx scripts/test-live-smoke.ts",
     "test:live-smoke": "tsx scripts/test-live-smoke.ts",
     "test:client-connection": "tsx scripts/test-client-connection.ts",
+    "test:key-provision": "tsx scripts/test-key-provision.ts",
+    "key:provision": "tsx scripts/provision-key.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },

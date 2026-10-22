@@ -1,4 +1,12 @@
-import { requireAuth, recordUsage, generateApiKey, ApiKeyRecord, Env } from "./auth";
+import {
+  requireAuth,
+  validateMasterAuth,
+  recordUsage,
+  generateApiKey,
+  ApiKeyRecord,
+  ProvisionKeyPayload,
+  Env,
+} from "./auth";
 import { generateMcpSpec } from "./gemini";
 
 export type { Env };
@@ -149,7 +157,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       );
     }
 
-    // Dinamiskā atslēgu izsniegšana (Admin/Headless)
+    // Dinamiskā atslēgu izsniegšana (Admin/Headless - Stingrā perimetra aizsardzība)
     if (url.pathname === "/keys/provision") {
       if (request.method !== "POST") {
         return new Response(JSON.stringify({ error: "Method Not Allowed. Use POST." }), {
@@ -158,44 +166,92 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         });
       }
 
-      // Pārbaude: atļauts TIKAI ar derīgu Master API atslēgu
-      const authHeader = request.headers.get("Authorization");
-      const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
-
-      if (!env.MCPX_API_KEY || token !== env.MCPX_API_KEY) {
-        return new Response(
-          JSON.stringify({ error: "Forbidden: Master admin key required for key provisioning." }),
-          { status: 403, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
-        );
+      // 1. Ātruma ierobežotājs (Rate Limiting perimetram: 5 req/min uz IP)
+      if (env.RATE_LIMITER) {
+        const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
+        const { success } = await env.RATE_LIMITER.limit({ key: `prov:${clientIp}` });
+        if (!success) {
+          return new Response(
+            JSON.stringify({ error: "Too Many Requests: Rate limit exceeded for key provisioning." }),
+            {
+              status: 429,
+              headers: { "Content-Type": "application/json", "Retry-After": "60", ...CORS_HEADERS },
+            }
+          );
+        }
       }
 
+      // 2. Stingra Master Administratora autorizācijas pārbaude ar timing-safe salīdzināšanu
+      const masterAuth = await validateMasterAuth(request, env);
+      if (!masterAuth.authorized) {
+        const headers = new Headers(masterAuth.response.headers);
+        for (const [k, v] of Object.entries(CORS_HEADERS)) {
+          headers.set(k, v);
+        }
+        return new Response(masterAuth.response.body, {
+          status: masterAuth.response.status,
+          headers,
+        });
+      }
+
+      // 3. Krātuves pārbaude
       if (!env.MCPX_KEYS) {
         return new Response(
-          JSON.stringify({ error: "Storage not configured." }),
+          JSON.stringify({ error: "Storage not configured on server." }),
           { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
         );
       }
 
+      // 4. Ievades datu validācija (TypeSafe Zod/TS shēma)
       try {
-        const payload = (await request.json()) as {
-          userId?: string;
-          plan?: "free" | "pro" | "enterprise";
-          requestsLimit?: number;
-        };
+        const payload = (await request.json()) as ProvisionKeyPayload;
 
-        if (!payload.userId || typeof payload.userId !== "string") {
+        const rawTenant = payload.tenantId || payload.userId;
+        if (!rawTenant || typeof rawTenant !== "string") {
           return new Response(
-            JSON.stringify({ error: "Bad Request: 'userId' (string) is required." }),
+            JSON.stringify({
+              error: "Bad Request: 'tenantId' is required and must be an alphanumeric string [a-zA-Z0-9_-].",
+            }),
             { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
           );
         }
 
+        const tenantId = rawTenant.trim();
+        if (!/^[a-zA-Z0-9_-]{3,64}$/.test(tenantId)) {
+          return new Response(
+            JSON.stringify({
+              error: "Bad Request: 'tenantId' must be 3-64 characters matching pattern [a-zA-Z0-9_-].",
+            }),
+            { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          );
+        }
+
+        const description = typeof payload.description === "string" ? payload.description.slice(0, 128).trim() : undefined;
+        const plan = payload.plan || "pro";
+        const rateLimit = typeof payload.rateLimit === "number" && payload.rateLimit >= 1 && payload.rateLimit <= 120
+          ? payload.rateLimit
+          : 10;
+        const scopes = Array.isArray(payload.scopes) && payload.scopes.length > 0
+          ? payload.scopes
+          : ["mcp:read", "mcp:write", "mcp:generate"];
+
+        let expiresAt: string | undefined = undefined;
+        if (typeof payload.expiresInDays === "number" && payload.expiresInDays > 0) {
+          expiresAt = new Date(Date.now() + payload.expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+        }
+
         const newApiKey = generateApiKey();
         const record: ApiKeyRecord = {
-          userId: payload.userId.trim(),
-          plan: payload.plan || "pro",
+          userId: tenantId,
+          tenantId,
+          description,
+          plan,
           status: "active",
           requestsLimit: payload.requestsLimit,
+          rateLimit,
+          scopes,
+          createdAt: new Date().toISOString(),
+          expiresAt,
         };
 
         await env.MCPX_KEYS.put(`key:${newApiKey}`, JSON.stringify(record));
@@ -204,13 +260,19 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           JSON.stringify({
             success: true,
             apiKey: newApiKey,
+            tenantId: record.tenantId,
             userId: record.userId,
+            description: record.description ?? null,
             plan: record.plan,
             status: record.status,
+            rateLimit: record.rateLimit,
+            scopes: record.scopes,
+            createdAt: record.createdAt,
+            expiresAt: record.expiresAt ?? null,
             requestsLimit: record.requestsLimit ?? null,
           }),
           {
-            status: 201,
+            status: 200,
             headers: { "Content-Type": "application/json", ...CORS_HEADERS },
           }
         );
