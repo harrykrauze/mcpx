@@ -18,6 +18,12 @@
       "id": "10a9a338595d40a5b424d3be11e26860"
     }
   ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "mcpx_telemetry"
+    }
+  ],
   "unsafe": {
     "bindings": [
       {

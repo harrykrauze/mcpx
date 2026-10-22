@@ -6,6 +6,8 @@ import {
   computeKeyId,
   ApiKeyRecord,
   ProvisionKeyPayload,
+  AnalyticsEngineDataPoint,
+  AnalyticsEngineDataset,
   Env,
 } from "./auth";
 import { generateMcpSpec } from "./gemini";
@@ -15,6 +17,70 @@ export type { Env };
 export interface ExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
   passThroughOnException(): void;
+}
+
+export interface TelemetryPoint {
+  tenantId?: string;
+  method: string;
+  toolName?: string;
+  status: "success" | "timeout" | "security_violation" | "client_error" | "revoked" | "server_error";
+  clientType?: string;
+  executionTimeMs: number;
+  statusCode: number;
+  payloadSizeBytes?: number;
+}
+
+export function detectClientType(userAgent: string | null): string {
+  if (!userAgent) return "unknown";
+  const ua = userAgent.toLowerCase();
+  if (ua.includes("claude-code") || ua.includes("claudecode") || ua.includes("claude")) {
+    return "claude-code";
+  }
+  if (ua.includes("cursor")) {
+    return "cursor";
+  }
+  if (ua.includes("mozilla") || ua.includes("chrome") || ua.includes("safari") || ua.includes("edge")) {
+    return "browser";
+  }
+  if (ua.includes("node") || ua.includes("python") || ua.includes("curl") || ua.includes("tsx") || ua.includes("postman")) {
+    return "custom-agent";
+  }
+  return "custom-agent";
+}
+
+export function recordTelemetry(
+  env: Env,
+  ctx: ExecutionContext,
+  point: TelemetryPoint
+): void {
+  if (!env.ANALYTICS || typeof env.ANALYTICS.writeDataPoint !== "function") {
+    return;
+  }
+  ctx.waitUntil(
+    (async () => {
+      try {
+        const tenant = point.tenantId || "anonymous";
+        env.ANALYTICS!.writeDataPoint({
+          indexes: [tenant],
+          blobs: [
+            tenant,
+            point.method,
+            point.toolName || "none",
+            point.status,
+            point.clientType || "unknown",
+          ],
+          doubles: [
+            Math.max(0, Math.round(point.executionTimeMs)),
+            point.statusCode,
+            point.payloadSizeBytes ?? 0,
+          ],
+        });
+      } catch (err) {
+        // Telemetrijas kļūdas nedrīkst pārtraukt pamata izpildi
+        console.error("Telemetry write failed:", err);
+      }
+    })()
+  );
 }
 
 const CORS_HEADERS = {
@@ -27,7 +93,49 @@ const MAX_PAYLOAD_BYTES = 512 * 1024; // 512 KB drošības slieksnis
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const startTime = Date.now();
     const url = new URL(request.url);
+    const clientType = detectClientType(request.headers.get("user-agent"));
+    const rawContentLength = request.headers.get("content-length");
+    const payloadSizeBytes = rawContentLength ? parseInt(rawContentLength, 10) || 0 : 0;
+
+    const track = (
+      response: Response,
+      options: {
+        tenantId?: string;
+        method: string;
+        toolName?: string;
+        status?: TelemetryPoint["status"];
+      }
+    ): Response => {
+      const executionTimeMs = Date.now() - startTime;
+      let status = options.status;
+      if (!status) {
+        if (response.status >= 500) {
+          status = "server_error";
+        } else if (response.status === 401 || response.status === 403) {
+          const authHeader = response.headers.get("WWW-Authenticate") || "";
+          status = authHeader.includes("token_revoked") ? "revoked" : "security_violation";
+        } else if (response.status === 429) {
+          status = "security_violation";
+        } else if (response.status >= 400) {
+          status = "client_error";
+        } else {
+          status = "success";
+        }
+      }
+      recordTelemetry(env, ctx, {
+        tenantId: options.tenantId,
+        method: options.method,
+        toolName: options.toolName || "none",
+        status,
+        clientType,
+        executionTimeMs,
+        statusCode: response.status,
+        payloadSizeBytes,
+      });
+      return response;
+    };
 
     if (request.method === "OPTIONS") {
       return new Response(null, { headers: CORS_HEADERS });
@@ -35,18 +143,22 @@ export default {
 
     // 1. Publiskais veselības pārbaudes maršruts
     if (url.pathname === "/health" || (url.pathname === "/" && request.method === "GET")) {
-      return new Response(
-        JSON.stringify({
-          status: "healthy",
-          domain: "mcpx.harrykrauze.com",
-          geminiConfigured: !!env.GEMINI_API_KEY,
-          authConfigured: !!(env.MCPX_API_KEY || env.MCPX_KEYS),
-          kvConfigured: !!env.MCPX_KEYS,
-          rateLimiterConfigured: !!env.RATE_LIMITER,
-        }, null, 2),
-        {
-          headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADERS }
-        }
+      return track(
+        new Response(
+          JSON.stringify({
+            status: "healthy",
+            domain: "mcpx.harrykrauze.com",
+            geminiConfigured: !!env.GEMINI_API_KEY,
+            authConfigured: !!(env.MCPX_API_KEY || env.MCPX_KEYS),
+            kvConfigured: !!env.MCPX_KEYS,
+            rateLimiterConfigured: !!env.RATE_LIMITER,
+            analyticsConfigured: !!env.ANALYTICS,
+          }, null, 2),
+          {
+            headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADERS }
+          }
+        ),
+        { method: "health", status: "success" }
       );
     }
 
@@ -104,67 +216,82 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
 }
 \`\`\`
 `;
-      return new Response(llmsContent, {
-        headers: { "Content-Type": "text/markdown; charset=utf-8", ...CORS_HEADERS }
-      });
+      return track(
+        new Response(llmsContent, {
+          headers: { "Content-Type": "text/markdown; charset=utf-8", ...CORS_HEADERS }
+        }),
+        { method: "llms.txt", status: "success" }
+      );
     }
 
     const baseUrl = env.ISSUER_URL || "https://mcpx.harrykrauze.com";
 
     // RFC 9728: OAuth Protected Resource Metadata
     if (url.pathname === "/.well-known/oauth-protected-resource") {
-      return new Response(
-        JSON.stringify({
-          resource: `${baseUrl}/mcp/sse`,
-          authorization_servers: [baseUrl],
-          registration_endpoint: `${baseUrl}/keys/provision`,
-          token_endpoint: `${baseUrl}/keys/status`,
-          bearer_methods_supported: ["header"],
-          scopes_supported: ["mcp:connect", "mcp:tools", "mcp:generate", "mcp:admin"],
-          resource_documentation: `${baseUrl}/MCP_CONFIG.md`,
-          dcr_supported: false,
-        }, null, 2),
-        {
-          headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADERS }
-        }
+      return track(
+        new Response(
+          JSON.stringify({
+            resource: `${baseUrl}/mcp/sse`,
+            authorization_servers: [baseUrl],
+            registration_endpoint: `${baseUrl}/keys/provision`,
+            token_endpoint: `${baseUrl}/keys/status`,
+            bearer_methods_supported: ["header"],
+            scopes_supported: ["mcp:connect", "mcp:tools", "mcp:generate", "mcp:admin"],
+            resource_documentation: `${baseUrl}/MCP_CONFIG.md`,
+            dcr_supported: false,
+          }, null, 2),
+          {
+            headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADERS }
+          }
+        ),
+        { method: "oauth-protected-resource", status: "success" }
       );
     }
 
     // RFC 8414: OAuth 2.0 Authorization Server Metadata
     if (url.pathname === "/.well-known/oauth-authorization-server") {
-      return new Response(
-        JSON.stringify({
-          issuer: baseUrl,
-          token_endpoint: `${baseUrl}/keys/status`,
-          registration_endpoint: `${baseUrl}/keys/provision`,
-          jwks_uri: `${baseUrl}/.well-known/jwks.json`,
-          response_types_supported: ["token"],
-          grant_types_supported: ["client_credentials"],
-          resource_registration_endpoint: `${baseUrl}/.well-known/oauth-protected-resource`,
-        }, null, 2),
-        {
-          headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADERS }
-        }
+      return track(
+        new Response(
+          JSON.stringify({
+            issuer: baseUrl,
+            token_endpoint: `${baseUrl}/keys/status`,
+            registration_endpoint: `${baseUrl}/keys/provision`,
+            jwks_uri: `${baseUrl}/.well-known/jwks.json`,
+            response_types_supported: ["token"],
+            grant_types_supported: ["client_credentials"],
+            resource_registration_endpoint: `${baseUrl}/.well-known/oauth-protected-resource`,
+          }, null, 2),
+          {
+            headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADERS }
+          }
+        ),
+        { method: "oauth-authorization-server", status: "success" }
       );
     }
 
     // RFC 7517: JSON Web Key Set (JWKS)
     if (url.pathname === "/.well-known/jwks.json") {
-      return new Response(
-        JSON.stringify({ keys: [] }, null, 2),
-        {
-          headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADERS }
-        }
+      return track(
+        new Response(
+          JSON.stringify({ keys: [] }, null, 2),
+          {
+            headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADERS }
+          }
+        ),
+        { method: "jwks", status: "success" }
       );
     }
 
     // Dinamiskā atslēgu izsniegšana (Admin/Headless - Stingrā perimetra aizsardzība)
     if (url.pathname === "/keys/provision") {
       if (request.method !== "POST") {
-        return new Response(JSON.stringify({ error: "Method Not Allowed. Use POST." }), {
-          status: 405,
-          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-        });
+        return track(
+          new Response(JSON.stringify({ error: "Method Not Allowed. Use POST." }), {
+            status: 405,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          }),
+          { method: "keys/provision", status: "client_error" }
+        );
       }
 
       // 1. Ātruma ierobežotājs (Rate Limiting perimetram: 5 req/min uz IP)
@@ -172,12 +299,15 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
         const { success } = await env.RATE_LIMITER.limit({ key: `prov:${clientIp}` });
         if (!success) {
-          return new Response(
-            JSON.stringify({ error: "Too Many Requests: Rate limit exceeded for key provisioning." }),
-            {
-              status: 429,
-              headers: { "Content-Type": "application/json", "Retry-After": "60", ...CORS_HEADERS },
-            }
+          return track(
+            new Response(
+              JSON.stringify({ error: "Too Many Requests: Rate limit exceeded for key provisioning." }),
+              {
+                status: 429,
+                headers: { "Content-Type": "application/json", "Retry-After": "60", ...CORS_HEADERS },
+              }
+            ),
+            { method: "keys/provision", status: "security_violation" }
           );
         }
       }
@@ -189,17 +319,23 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         for (const [k, v] of Object.entries(CORS_HEADERS)) {
           headers.set(k, v);
         }
-        return new Response(masterAuth.response.body, {
-          status: masterAuth.response.status,
-          headers,
-        });
+        return track(
+          new Response(masterAuth.response.body, {
+            status: masterAuth.response.status,
+            headers,
+          }),
+          { method: "keys/provision", status: "security_violation" }
+        );
       }
 
       // 3. Krātuves pārbaude
       if (!env.MCPX_KEYS) {
-        return new Response(
-          JSON.stringify({ error: "Storage not configured on server." }),
-          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        return track(
+          new Response(
+            JSON.stringify({ error: "Storage not configured on server." }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: "keys/provision", status: "server_error" }
         );
       }
 
@@ -209,21 +345,27 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
 
         const rawTenant = payload.tenantId || payload.userId;
         if (!rawTenant || typeof rawTenant !== "string") {
-          return new Response(
-            JSON.stringify({
-              error: "Bad Request: 'tenantId' is required and must be an alphanumeric string [a-zA-Z0-9_-].",
-            }),
-            { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          return track(
+            new Response(
+              JSON.stringify({
+                error: "Bad Request: 'tenantId' is required and must be an alphanumeric string [a-zA-Z0-9_-].",
+              }),
+              { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { method: "keys/provision", status: "client_error" }
           );
         }
 
         const tenantId = rawTenant.trim();
         if (!/^[a-zA-Z0-9_-]{3,64}$/.test(tenantId)) {
-          return new Response(
-            JSON.stringify({
-              error: "Bad Request: 'tenantId' must be 3-64 characters matching pattern [a-zA-Z0-9_-].",
-            }),
-            { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          return track(
+            new Response(
+              JSON.stringify({
+                error: "Bad Request: 'tenantId' must be 3-64 characters matching pattern [a-zA-Z0-9_-].",
+              }),
+              { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { method: "keys/provision", status: "client_error" }
           );
         }
 
@@ -260,31 +402,37 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         await env.MCPX_KEYS.put(`key:${newApiKey}`, JSON.stringify(record));
         await env.MCPX_KEYS.put(`id:${keyId}`, newApiKey);
 
-        return new Response(
-          JSON.stringify({
-            success: true,
-            keyId: record.keyId,
-            apiKey: newApiKey,
-            tenantId: record.tenantId,
-            userId: record.userId,
-            description: record.description ?? null,
-            plan: record.plan,
-            status: record.status,
-            rateLimit: record.rateLimit,
-            scopes: record.scopes,
-            createdAt: record.createdAt,
-            expiresAt: record.expiresAt ?? null,
-            requestsLimit: record.requestsLimit ?? null,
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-          }
+        return track(
+          new Response(
+            JSON.stringify({
+              success: true,
+              keyId: record.keyId,
+              apiKey: newApiKey,
+              tenantId: record.tenantId,
+              userId: record.userId,
+              description: record.description ?? null,
+              plan: record.plan,
+              status: record.status,
+              rateLimit: record.rateLimit,
+              scopes: record.scopes,
+              createdAt: record.createdAt,
+              expiresAt: record.expiresAt ?? null,
+              requestsLimit: record.requestsLimit ?? null,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+            }
+          ),
+          { tenantId: record.tenantId, method: "keys/provision", status: "success" }
         );
       } catch (err: any) {
-        return new Response(
-          JSON.stringify({ error: "Bad Request: Invalid JSON body.", details: err?.message }),
-          { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        return track(
+          new Response(
+            JSON.stringify({ error: "Bad Request: Invalid JSON body.", details: err?.message }),
+            { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: "keys/provision", status: "client_error" }
         );
       }
     }
@@ -296,9 +444,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
         const { success } = await env.RATE_LIMITER.limit({ key: `list:${clientIp}` });
         if (!success) {
-          return new Response(
-            JSON.stringify({ error: "Too Many Requests: Rate limit exceeded." }),
-            { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "60", ...CORS_HEADERS } }
+          return track(
+            new Response(
+              JSON.stringify({ error: "Too Many Requests: Rate limit exceeded." }),
+              { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "60", ...CORS_HEADERS } }
+            ),
+            { method: "keys/list", status: "security_violation" }
           );
         }
       }
@@ -310,16 +461,22 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         for (const [k, v] of Object.entries(CORS_HEADERS)) {
           headers.set(k, v);
         }
-        return new Response(masterAuth.response.body, {
-          status: masterAuth.response.status,
-          headers,
-        });
+        return track(
+          new Response(masterAuth.response.body, {
+            status: masterAuth.response.status,
+            headers,
+          }),
+          { method: "keys/list", status: "security_violation" }
+        );
       }
 
       if (!env.MCPX_KEYS) {
-        return new Response(
-          JSON.stringify({ error: "Storage not configured." }),
-          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        return track(
+          new Response(
+            JSON.stringify({ error: "Storage not configured." }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: "keys/list", status: "server_error" }
         );
       }
 
@@ -363,18 +520,24 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           }
         }
 
-        return new Response(
-          JSON.stringify({
-            success: true,
-            total: keysList.length,
-            keys: keysList,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        return track(
+          new Response(
+            JSON.stringify({
+              success: true,
+              total: keysList.length,
+              keys: keysList,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { tenantId: "master-admin", method: "keys/list", status: "success" }
         );
       } catch (err: any) {
-        return new Response(
-          JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
-          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        return track(
+          new Response(
+            JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: "keys/list", status: "server_error" }
         );
       }
     }
@@ -389,9 +552,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
         const { success } = await env.RATE_LIMITER.limit({ key: `del:${clientIp}` });
         if (!success) {
-          return new Response(
-            JSON.stringify({ error: "Too Many Requests: Rate limit exceeded." }),
-            { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "60", ...CORS_HEADERS } }
+          return track(
+            new Response(
+              JSON.stringify({ error: "Too Many Requests: Rate limit exceeded." }),
+              { status: 429, headers: { "Content-Type": "application/json", "Retry-After": "60", ...CORS_HEADERS } }
+            ),
+            { method: "keys/revoke", status: "security_violation" }
           );
         }
       }
@@ -403,16 +569,22 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         for (const [k, v] of Object.entries(CORS_HEADERS)) {
           headers.set(k, v);
         }
-        return new Response(masterAuth.response.body, {
-          status: masterAuth.response.status,
-          headers,
-        });
+        return track(
+          new Response(masterAuth.response.body, {
+            status: masterAuth.response.status,
+            headers,
+          }),
+          { method: "keys/revoke", status: "security_violation" }
+        );
       }
 
       if (!env.MCPX_KEYS) {
-        return new Response(
-          JSON.stringify({ error: "Storage not configured." }),
-          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        return track(
+          new Response(
+            JSON.stringify({ error: "Storage not configured." }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: "keys/revoke", status: "server_error" }
         );
       }
 
@@ -430,9 +602,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         }
 
         if (!targetIdentifier) {
-          return new Response(
-            JSON.stringify({ error: "Bad Request: 'keyId' or 'apiKey' is required." }),
-            { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          return track(
+            new Response(
+              JSON.stringify({ error: "Bad Request: 'keyId' or 'apiKey' is required." }),
+              { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { method: "keys/revoke", status: "client_error" }
           );
         }
 
@@ -472,9 +647,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         }
 
         if (!rawRecord) {
-          return new Response(
-            JSON.stringify({ error: "Not Found: API key or keyId not found." }),
-            { status: 404, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          return track(
+            new Response(
+              JSON.stringify({ error: "Not Found: API key or keyId not found." }),
+              { status: 404, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { method: "keys/revoke", status: "client_error" }
           );
         }
 
@@ -488,23 +666,29 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
 
         await env.MCPX_KEYS.put(`key:${actualKey}`, JSON.stringify(record));
 
-        return new Response(
-          JSON.stringify({
-            success: true,
-            keyId: record.keyId || targetIdentifier,
-            status: "revoked",
-            revokedAt: record.revokedAt,
-            message: "API key successfully revoked.",
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-          }
+        return track(
+          new Response(
+            JSON.stringify({
+              success: true,
+              keyId: record.keyId || targetIdentifier,
+              status: "revoked",
+              revokedAt: record.revokedAt,
+              message: "API key successfully revoked.",
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+            }
+          ),
+          { tenantId: record.tenantId || "master-admin", method: "keys/revoke", status: "success" }
         );
       } catch (err: any) {
-        return new Response(
-          JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
-          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        return track(
+          new Response(
+            JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: "keys/revoke", status: "server_error" }
         );
       }
     }
@@ -517,58 +701,69 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         for (const [k, v] of Object.entries(CORS_HEADERS)) {
           headers.set(k, v);
         }
-        return new Response(auth.response.body, {
-          status: auth.response.status,
-          headers,
-        });
+        const isRevoked = (auth.response.headers.get("WWW-Authenticate") || "").includes("token_revoked");
+        return track(
+          new Response(auth.response.body, {
+            status: auth.response.status,
+            headers,
+          }),
+          { method: "keys/status", status: isRevoked ? "revoked" : "security_violation" }
+        );
       }
 
-      const { userId, plan, requestsLimit } = auth.context;
+      const { userId, plan, requestsLimit, tenantId } = auth.context;
       let usage = 0;
       if (env.MCPX_KEYS) {
         const usageStr = await env.MCPX_KEYS.get(`usage:${userId}`, "text");
         usage = usageStr ? parseInt(usageStr.trim(), 10) || 0 : 0;
       }
 
-      return new Response(
-        JSON.stringify({
-          success: true,
-          userId,
-          plan,
-          status: "active",
-          usage,
-          requestsLimit: requestsLimit ?? null,
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-        }
+      return track(
+        new Response(
+          JSON.stringify({
+            success: true,
+            userId,
+            plan,
+            status: "active",
+            usage,
+            requestsLimit: requestsLimit ?? null,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          }
+        ),
+        { tenantId: tenantId || userId, method: "keys/status", status: "success" }
       );
     }
 
-
-
     // SSE plūsmas ceļš (/sse un /mcp/sse)
     if ((url.pathname === "/sse" || url.pathname === "/mcp/sse") && request.method === "GET") {
-      return new Response("event: endpoint\ndata: /message\n\n", {
-        status: 200,
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache, no-transform",
-          "Connection": "keep-alive",
-          "X-Accel-Buffering": "no",
-          ...CORS_HEADERS,
-        },
-      });
+      return track(
+        new Response("event: endpoint\ndata: /message\n\n", {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            ...CORS_HEADERS,
+          },
+        }),
+        { method: "mcp/sse", status: "success" }
+      );
     }
 
     // 2. Apstrādes un koda ģenerēšanas maršruts (/api/generate, /message, /mcp/messages)
     if (url.pathname === "/api/generate" || url.pathname === "/message" || url.pathname === "/mcp/messages") {
       if (request.method !== "POST") {
-        return new Response(JSON.stringify({ error: "Method Not Allowed. Use POST." }), {
-          status: 405,
-          headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-        });
+        return track(
+          new Response(JSON.stringify({ error: "Method Not Allowed. Use POST." }), {
+            status: 405,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          }),
+          { method: url.pathname.replace(/^\//, ""), status: "client_error" }
+        );
       }
 
       // 2.0. Ātruma ierobežotāja pārbaude (Rate Limiting: 10 req/min)
@@ -577,18 +772,21 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         const { success } = await env.RATE_LIMITER.limit({ key: clientKey });
 
         if (!success) {
-          return new Response(
-            JSON.stringify({
-              error: "Too Many Requests: Rate limit exceeded (10 req/min). Please try again later.",
-            }),
-            {
-              status: 429,
-              headers: {
-                "Content-Type": "application/json",
-                "Retry-After": "60",
-                ...CORS_HEADERS,
-              },
-            }
+          return track(
+            new Response(
+              JSON.stringify({
+                error: "Too Many Requests: Rate limit exceeded (10 req/min). Please try again later.",
+              }),
+              {
+                status: 429,
+                headers: {
+                  "Content-Type": "application/json",
+                  "Retry-After": "60",
+                  ...CORS_HEADERS,
+                },
+              }
+            ),
+            { method: url.pathname.replace(/^\//, ""), status: "security_violation" }
           );
         }
       }
@@ -596,11 +794,14 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       // 2.1. Payload izmēra pārbaude pirms lasīšanas atmiņā
       const contentLength = request.headers.get("content-length");
       if (contentLength && parseInt(contentLength, 10) > MAX_PAYLOAD_BYTES) {
-        return new Response(
-          JSON.stringify({
-            error: "Payload Too Large: Maximum allowed request size is 512 KB.",
-          }),
-          { status: 413, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        return track(
+          new Response(
+            JSON.stringify({
+              error: "Payload Too Large: Maximum allowed request size is 512 KB.",
+            }),
+            { status: 413, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: url.pathname.replace(/^\//, ""), status: "client_error" }
         );
       }
 
@@ -611,27 +812,35 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         for (const [k, v] of Object.entries(CORS_HEADERS)) {
           headers.set(k, v);
         }
-        return new Response(auth.response.body, {
-          status: auth.response.status,
-          headers,
-        });
+        const isRevoked = (auth.response.headers.get("WWW-Authenticate") || "").includes("token_revoked");
+        return track(
+          new Response(auth.response.body, {
+            status: auth.response.status,
+            headers,
+          }),
+          { method: url.pathname.replace(/^\//, ""), status: isRevoked ? "revoked" : "security_violation" }
+        );
       }
 
-      const { userId, plan, requestsLimit } = auth.context;
+      const { userId, plan, requestsLimit, tenantId } = auth.context;
+      const activeTenant = tenantId || userId;
 
       // 2.3. Lietotāja kvotas pārbaude (ja definēts requestsLimit)
       if (requestsLimit !== undefined && env.MCPX_KEYS) {
         const currentUsageStr = await env.MCPX_KEYS.get(`usage:${userId}`, "text");
         const currentUsage = currentUsageStr ? parseInt(currentUsageStr, 10) || 0 : 0;
         if (currentUsage >= requestsLimit) {
-          return new Response(
-            JSON.stringify({
-              error: `Quota Exceeded: Plan '${plan}' limit of ${requestsLimit} requests reached.`,
-            }),
-            {
-              status: 429,
-              headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-            }
+          return track(
+            new Response(
+              JSON.stringify({
+                error: `Quota Exceeded: Plan '${plan}' limit of ${requestsLimit} requests reached.`,
+              }),
+              {
+                status: 429,
+                headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+              }
+            ),
+            { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), status: "security_violation" }
           );
         }
       }
@@ -646,83 +855,92 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
 
           // MCP Dzīvescikls: initialize
           if (body.method === "initialize") {
-            return new Response(
-              JSON.stringify({
-                jsonrpc: "2.0",
-                id: reqId,
-                result: {
-                  protocolVersion: "2024-11-05",
-                  capabilities: {
-                    tools: {
-                      listChanged: false,
+            return track(
+              new Response(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: reqId,
+                  result: {
+                    protocolVersion: "2024-11-05",
+                    capabilities: {
+                      tools: {
+                        listChanged: false,
+                      },
+                    },
+                    serverInfo: {
+                      name: "mcpx",
+                      version: "1.0.0",
                     },
                   },
-                  serverInfo: {
-                    name: "mcpx",
-                    version: "1.0.0",
-                  },
-                },
-              }),
-              {
-                status: 200,
-                headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-              }
+                }),
+                {
+                  status: 200,
+                  headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+                }
+              ),
+              { tenantId: activeTenant, method: "initialize", status: "success" }
             );
           }
 
           // MCP Dzīvescikls: notifications/initialized
           if (body.method === "notifications/initialized") {
-            return new Response(
-              JSON.stringify({ jsonrpc: "2.0" }),
-              {
-                status: 200,
-                headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-              }
+            return track(
+              new Response(
+                JSON.stringify({ jsonrpc: "2.0" }),
+                {
+                  status: 200,
+                  headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+                }
+              ),
+              { tenantId: activeTenant, method: "notifications/initialized", status: "success" }
             );
           }
 
           // MCP Rīku atklāšana: tools/list
           if (body.method === "tools/list") {
-            return new Response(
-              JSON.stringify({
-                jsonrpc: "2.0",
-                id: reqId,
-                result: {
-                  tools: [
-                    {
-                      name: "generate_mcp_server",
-                      description: "Transforms API snippets, OpenAPI specs, or cURL commands into executable TypeScript or Python MCP servers.",
-                      inputSchema: {
-                        type: "object",
-                        properties: {
-                          prompt: {
-                            type: "string",
-                            description: "API specification, cURL snippet, or description of the MCP server to generate.",
+            return track(
+              new Response(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: reqId,
+                  result: {
+                    tools: [
+                      {
+                        name: "generate_mcp_server",
+                        description: "Transforms API snippets, OpenAPI specs, or cURL commands into executable TypeScript or Python MCP servers.",
+                        inputSchema: {
+                          type: "object",
+                          properties: {
+                            prompt: {
+                              type: "string",
+                              description: "API specification, cURL snippet, or description of the MCP server to generate.",
+                            },
                           },
+                          required: ["prompt"],
                         },
-                        required: ["prompt"],
                       },
-                    },
-                    {
-                      name: "evaluate_fraud_transaction",
-                      description: "Real-time risk scoring and transaction policy evaluation tool.",
-                      inputSchema: {
-                        type: "object",
-                        properties: {
-                          amount: { type: "number", description: "Transaction amount in EUR/USD" },
-                          currency: { type: "string", description: "ISO currency code" },
-                          userRiskScore: { type: "number", description: "User risk score between 0 and 1" },
+                      {
+                        name: "evaluate_fraud_transaction",
+                        description: "Real-time risk scoring and transaction policy evaluation tool.",
+                        inputSchema: {
+                          type: "object",
+                          properties: {
+                            amount: { type: "number", description: "Transaction amount in EUR/USD" },
+                            currency: { type: "string", description: "ISO currency code" },
+                            userRiskScore: { type: "number", description: "User risk score between 0 and 1" },
+                          },
+                          required: ["amount", "currency"],
                         },
-                        required: ["amount", "currency"],
                       },
-                    },
-                  ],
-                },
-              }),
-              {
-                status: 200,
-                headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-              }
+                    ],
+                  },
+                }),
+                {
+                  status: 200,
+                  headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+                }
+              ),
+              { tenantId: activeTenant, method: "tools/list", status: "success" }
             );
           }
 
@@ -734,44 +952,50 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             if (toolName === "generate_mcp_server") {
               const prompt = toolArgs.prompt || toolArgs.input || toolArgs.spec;
               if (!prompt || typeof prompt !== "string") {
-                return new Response(
-                  JSON.stringify({
-                    jsonrpc: "2.0",
-                    id: reqId,
-                    error: {
-                      code: -32602,
-                      message: "Invalid params: 'prompt' string argument is required.",
-                    },
-                  }),
-                  { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+                return track(
+                  new Response(
+                    JSON.stringify({
+                      jsonrpc: "2.0",
+                      id: reqId,
+                      error: {
+                        code: -32602,
+                        message: "Invalid params: 'prompt' string argument is required.",
+                      },
+                    }),
+                    { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+                  ),
+                  { tenantId: activeTenant, method: "tools/call", toolName: "generate_mcp_server", status: "client_error" }
                 );
               }
 
               const result = await generateMcpSpec(prompt, env.GEMINI_API_KEY);
               ctx.waitUntil(recordUsage(env, userId));
 
-              return new Response(
-                JSON.stringify({
-                  jsonrpc: "2.0",
-                  id: reqId,
-                  result: {
-                    content: [
-                      {
-                        type: "text",
-                        text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
-                      },
-                    ],
-                  },
-                }),
-                {
-                  status: 200,
-                  headers: {
-                    "Content-Type": "application/json",
-                    "X-MCPX-User": userId,
-                    "X-MCPX-Plan": plan,
-                    ...CORS_HEADERS,
-                  },
-                }
+              return track(
+                new Response(
+                  JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: reqId,
+                    result: {
+                      content: [
+                        {
+                          type: "text",
+                          text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
+                        },
+                      ],
+                    },
+                  }),
+                  {
+                    status: 200,
+                    headers: {
+                      "Content-Type": "application/json",
+                      "X-MCPX-User": userId,
+                      "X-MCPX-Plan": plan,
+                      ...CORS_HEADERS,
+                    },
+                  }
+                ),
+                { tenantId: activeTenant, method: "tools/call", toolName: "generate_mcp_server", status: "success" }
               );
             }
 
@@ -781,65 +1005,77 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
               const userRiskScore = Number(toolArgs.userRiskScore) || 0;
               const isHighRisk = amount > 5000 || userRiskScore > 0.8;
 
-              return new Response(
-                JSON.stringify({
-                  jsonrpc: "2.0",
-                  id: reqId,
-                  result: {
-                    content: [
-                      {
-                        type: "text",
-                        text: JSON.stringify({
-                          decision: isHighRisk ? "MANUAL_REVIEW" : "APPROVE",
-                          riskLevel: isHighRisk ? "HIGH" : "LOW",
-                          amount,
-                          currency,
-                          userRiskScore,
-                          timestamp: new Date().toISOString(),
-                        }, null, 2),
-                      },
-                    ],
-                  },
-                }),
-                {
-                  status: 200,
-                  headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-                }
+              return track(
+                new Response(
+                  JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: reqId,
+                    result: {
+                      content: [
+                        {
+                          type: "text",
+                          text: JSON.stringify({
+                            decision: isHighRisk ? "MANUAL_REVIEW" : "APPROVE",
+                            riskLevel: isHighRisk ? "HIGH" : "LOW",
+                            amount,
+                            currency,
+                            userRiskScore,
+                            timestamp: new Date().toISOString(),
+                          }, null, 2),
+                        },
+                      ],
+                    },
+                  }),
+                  {
+                    status: 200,
+                    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+                  }
+                ),
+                { tenantId: activeTenant, method: "tools/call", toolName: "evaluate_fraud_transaction", status: "success" }
               );
             }
 
-            return new Response(
-              JSON.stringify({
-                jsonrpc: "2.0",
-                id: reqId,
-                error: {
-                  code: -32601,
-                  message: `Unknown tool: '${toolName}'`,
-                },
-              }),
-              { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            return track(
+              new Response(
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: reqId,
+                  error: {
+                    code: -32601,
+                    message: `Unknown tool: '${toolName}'`,
+                  },
+                }),
+                { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+              ),
+              { tenantId: activeTenant, method: "tools/call", toolName: String(toolName || "none"), status: "client_error" }
             );
           }
 
           // MCP Ping
           if (body.method === "ping") {
-            return new Response(
-              JSON.stringify({ jsonrpc: "2.0", id: reqId, result: {} }),
-              { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            return track(
+              new Response(
+                JSON.stringify({ jsonrpc: "2.0", id: reqId, result: {} }),
+                { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+              ),
+              { tenantId: activeTenant, method: "ping", status: "success" }
             );
           }
 
           // Citi neatpazīti JSON-RPC izsaukumi
-          return new Response(
-            JSON.stringify({
-              jsonrpc: "2.0",
-              id: reqId ?? null,
-              error: {
-                code: -32601,
-                message: `Method '${body.method}' not found.`,
-              },
-            }),
-            { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          return track(
+            new Response(
+              JSON.stringify({
+                jsonrpc: "2.0",
+                id: reqId ?? null,
+                error: {
+                  code: -32601,
+                  message: `Method '${body.method}' not found.`,
+                },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { tenantId: activeTenant, method: String(body.method || "unknown"), toolName: "none", status: "client_error" }
           );
         }
 
@@ -847,9 +1083,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         const rawInput = body.prompt || body.inputSnippet || body.message || body.input || body.spec;
 
         if (!rawInput || typeof rawInput !== "string") {
-          return new Response(
-            JSON.stringify({ error: "Bad Request: 'prompt', 'message', 'input', or 'spec' string is required." }),
-            { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          return track(
+            new Response(
+              JSON.stringify({ error: "Bad Request: 'prompt', 'message', 'input', or 'spec' string is required." }),
+              { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), status: "client_error" }
           );
         }
 
@@ -858,33 +1097,42 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         // 2.6. Asinhrona patēriņa uzskaite tikai pēc veiksmīga Gemini izsaukuma
         ctx.waitUntil(recordUsage(env, userId));
 
-        return new Response(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            meta: { userId, plan },
-            result,
-          }),
-          {
-            status: 200,
-            headers: {
-              "Content-Type": "application/json",
-              "X-MCPX-User": userId,
-              "X-MCPX-Plan": plan,
-              ...CORS_HEADERS,
-            },
-          }
+        return track(
+          new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              meta: { userId, plan },
+              result,
+            }),
+            {
+              status: 200,
+              headers: {
+                "Content-Type": "application/json",
+                "X-MCPX-User": userId,
+                "X-MCPX-Plan": plan,
+                ...CORS_HEADERS,
+              },
+            }
+          ),
+          { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), toolName: "generate_mcp_server", status: "success" }
         );
       } catch (err: any) {
-        return new Response(
-          JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
-          { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        return track(
+          new Response(
+            JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), status: "server_error" }
         );
       }
     }
 
-    return new Response(JSON.stringify({ error: "Not Found" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-    });
+    return track(
+      new Response(JSON.stringify({ error: "Not Found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+      }),
+      { method: "not_found", status: "client_error" }
+    );
   },
 };

@@ -39,6 +39,7 @@
     "test:client-connection": "tsx scripts/test-client-connection.ts",
     "test:key-provision": "tsx scripts/test-key-provision.ts",
     "test:key-lifecycle": "tsx scripts/test-key-lifecycle.ts",
+    "test:telemetry": "tsx scripts/test-analytics-telemetry.ts",
     "key:provision": "tsx scripts/provision-key.ts",
     "key:list": "tsx scripts/manage-keys.ts --action list",
     "key:revoke": "tsx scripts/manage-keys.ts --action revoke",

@@ -36,6 +36,16 @@ export interface KVNamespace {
   }>;
 }
 
+export interface AnalyticsEngineDataPoint {
+  indexes?: (string | null | undefined)[];
+  blobs?: (string | null | undefined)[];
+  doubles?: (number | null | undefined)[];
+}
+
+export interface AnalyticsEngineDataset {
+  writeDataPoint(point: AnalyticsEngineDataPoint): void;
+}
+
 export interface Env {
   GEMINI_API_KEY: string;
   MCPX_MASTER_KEY?: string;
@@ -48,6 +58,7 @@ export interface Env {
   RATE_LIMITER?: {
     limit: (options: { key: string }) => Promise<{ success: boolean }>;
   };
+  ANALYTICS?: AnalyticsEngineDataset;
 }
 
 export interface AuthContext {
