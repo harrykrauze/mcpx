@@ -26,6 +26,8 @@
 - `POST /mcp/messages?sessionId={id}`: Remote MCP JSON-RPC message delivery with tenant isolation.
 
 ## Tool Capabilities
+- `calculate_u_value_iso6946`: Deterministic building physics thermal transmittance (U-value) and total thermal resistance (R_tot) calculator according to EN ISO 6946. Supports directional surface resistances (horizontal walls, upward roofs/ceilings, downward floors), multi-layer resistance breakdown, and interstitial condensation risk analysis.
+- `analyze_jev_semantic_ast`: Advanced static code analysis and AST injection scanning using Jev rules. Detects prototype pollution (__proto__, setPrototypeOf), dynamic execution (eval, Function), system process access (process.env, child_process), and network/SSRF vectors (fetch, sockets) with standard or paranoid strictness.
 - `generate_mcp_server`: Transforms API snippets into executable TypeScript (@modelcontextprotocol/sdk) or Python (FastMCP with stateless_http=True) MCP servers.
 - `evaluate_fraud_transaction`: Real-time risk scoring and transaction policy evaluation tool.
 

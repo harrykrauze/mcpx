@@ -11,6 +11,12 @@ import {
   Env,
 } from "./auth";
 import { generateMcpSpec } from "./gemini";
+import {
+  calculateUValueIso6946,
+  analyzeJevSemanticAst,
+  UValueCalculationInput,
+  JevAstInput,
+} from "./tools/domainTools";
 
 export type { Env };
 
@@ -192,6 +198,8 @@ export default {
 - \`POST /mcp/messages?sessionId={id}\`: Remote MCP JSON-RPC message delivery with tenant isolation.
 
 ## Tool Capabilities
+- \`calculate_u_value_iso6946\`: Deterministic building physics thermal transmittance (U-value) and total thermal resistance (R_tot) calculator according to EN ISO 6946. Supports directional surface resistances (horizontal walls, upward roofs/ceilings, downward floors), multi-layer resistance breakdown, and interstitial condensation risk analysis.
+- \`analyze_jev_semantic_ast\`: Advanced static code analysis and AST injection scanning using Jev rules. Detects prototype pollution (__proto__, setPrototypeOf), dynamic execution (eval, Function), system process access (process.env, child_process), and network/SSRF vectors (fetch, sockets) with standard or paranoid strictness.
 - \`generate_mcp_server\`: Transforms API snippets into executable TypeScript (@modelcontextprotocol/sdk) or Python (FastMCP with stateless_http=True) MCP servers.
 - \`evaluate_fraud_transaction\`: Real-time risk scoring and transaction policy evaluation tool.
 
@@ -920,6 +928,66 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                         },
                       },
                       {
+                        name: "calculate_u_value_iso6946",
+                        description: "Calculates thermal transmittance (U-value) and total thermal resistance (R_tot) of multi-layer building elements according to EN ISO 6946.",
+                        inputSchema: {
+                          type: "object",
+                          properties: {
+                            direction: {
+                              type: "string",
+                              enum: ["horizontal", "upwards", "downwards"],
+                              description: "Direction of heat flow: 'horizontal' (walls), 'upwards' (roofs/ceilings), or 'downwards' (floors). Default: 'horizontal'.",
+                            },
+                            rsi: {
+                              type: "number",
+                              description: "Internal surface thermal resistance in m²K/W (default: 0.13 horizontal, 0.10 upwards, 0.17 downwards).",
+                            },
+                            rse: {
+                              type: "number",
+                              description: "External surface thermal resistance in m²K/W (default: 0.04).",
+                            },
+                            layers: {
+                              type: "array",
+                              description: "Ordered material layers from inside to outside.",
+                              items: {
+                                type: "object",
+                                properties: {
+                                  name: { type: "string", description: "Material/layer name" },
+                                  thickness_m: { type: "number", description: "Thickness in meters (d > 0)" },
+                                  lambda_w_mk: { type: "number", description: "Thermal conductivity in W/(m·K) (λ > 0)" },
+                                },
+                                required: ["name", "thickness_m", "lambda_w_mk"],
+                              },
+                            },
+                          },
+                          required: ["layers"],
+                        },
+                      },
+                      {
+                        name: "analyze_jev_semantic_ast",
+                        description: "Performs static code analysis and AST injection scanning using Jev rules to detect prototype pollution, dynamic execution, process access, and SSRF patterns.",
+                        inputSchema: {
+                          type: "object",
+                          properties: {
+                            code: {
+                              type: "string",
+                              description: "Source code to inspect.",
+                            },
+                            language: {
+                              type: "string",
+                              enum: ["typescript", "javascript", "python"],
+                              description: "Programming language of the source code. Default: 'typescript'.",
+                            },
+                            strictness: {
+                              type: "string",
+                              enum: ["standard", "paranoid"],
+                              description: "Analysis strictness level. 'paranoid' additionally flags timers, microtasks, and potential infinite loops. Default: 'standard'.",
+                            },
+                          },
+                          required: ["code"],
+                        },
+                      },
+                      {
                         name: "evaluate_fraud_transaction",
                         description: "Real-time risk scoring and transaction policy evaluation tool.",
                         inputSchema: {
@@ -948,6 +1016,90 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           if (body.method === "tools/call") {
             const toolName = body.params?.name;
             const toolArgs = body.params?.arguments || {};
+
+            if (toolName === "calculate_u_value_iso6946") {
+              try {
+                const result = calculateUValueIso6946(toolArgs as UValueCalculationInput);
+                return track(
+                  new Response(
+                    JSON.stringify({
+                      jsonrpc: "2.0",
+                      id: reqId,
+                      result: {
+                        content: [
+                          {
+                            type: "text",
+                            text: JSON.stringify(result, null, 2),
+                          },
+                        ],
+                      },
+                    }),
+                    {
+                      status: 200,
+                      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+                    }
+                  ),
+                  { tenantId: activeTenant, method: "tools/call", toolName: "calculate_u_value_iso6946", status: "success" }
+                );
+              } catch (calcErr: any) {
+                return track(
+                  new Response(
+                    JSON.stringify({
+                      jsonrpc: "2.0",
+                      id: reqId,
+                      error: {
+                        code: -32602,
+                        message: `Invalid params for calculate_u_value_iso6946: ${calcErr.message || String(calcErr)}`,
+                      },
+                    }),
+                    { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+                  ),
+                  { tenantId: activeTenant, method: "tools/call", toolName: "calculate_u_value_iso6946", status: "client_error" }
+                );
+              }
+            }
+
+            if (toolName === "analyze_jev_semantic_ast") {
+              try {
+                const result = analyzeJevSemanticAst(toolArgs as JevAstInput);
+                return track(
+                  new Response(
+                    JSON.stringify({
+                      jsonrpc: "2.0",
+                      id: reqId,
+                      result: {
+                        content: [
+                          {
+                            type: "text",
+                            text: JSON.stringify(result, null, 2),
+                          },
+                        ],
+                      },
+                    }),
+                    {
+                      status: 200,
+                      headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+                    }
+                  ),
+                  { tenantId: activeTenant, method: "tools/call", toolName: "analyze_jev_semantic_ast", status: "success" }
+                );
+              } catch (astErr: any) {
+                return track(
+                  new Response(
+                    JSON.stringify({
+                      jsonrpc: "2.0",
+                      id: reqId,
+                      error: {
+                        code: -32602,
+                        message: `Invalid params for analyze_jev_semantic_ast: ${astErr.message || String(astErr)}`,
+                      },
+                    }),
+                    { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+                  ),
+                  { tenantId: activeTenant, method: "tools/call", toolName: "analyze_jev_semantic_ast", status: "client_error" }
+                );
+              }
+            }
 
             if (toolName === "generate_mcp_server") {
               const prompt = toolArgs.prompt || toolArgs.input || toolArgs.spec;
