@@ -11,6 +11,10 @@ import {
   AnalyticsEngineDataPoint,
   AnalyticsEngineDataset,
   Env,
+  ExecutionContext,
+  TelemetryPoint,
+  detectClientType,
+  recordTelemetry,
 } from "./auth";
 import { generateMcpSpec } from "./gemini";
 import {
@@ -18,79 +22,14 @@ import {
   analyzeJevSemanticAst,
   UValueCalculationInput,
   JevAstInput,
+  TOOL_ALIASES,
+  resolveCanonicalToolName,
 } from "./tools/domainTools";
+import { handleCreemWebhook } from "./routes/webhooks";
+import { renderDashboardHtml, HealthStatus } from "./views/dashboard";
 
-export type { Env };
-
-export interface ExecutionContext {
-  waitUntil(promise: Promise<unknown>): void;
-  passThroughOnException(): void;
-}
-
-export interface TelemetryPoint {
-  tenantId?: string;
-  method: string;
-  toolName?: string;
-  status: "success" | "timeout" | "security_violation" | "client_error" | "revoked" | "server_error" | "payment_required";
-  clientType?: string;
-  executionTimeMs: number;
-  statusCode: number;
-  payloadSizeBytes?: number;
-  costCents?: number;
-}
-
-export function detectClientType(userAgent: string | null): string {
-  if (!userAgent) return "unknown";
-  const ua = userAgent.toLowerCase();
-  if (ua.includes("claude-code") || ua.includes("claudecode") || ua.includes("claude")) {
-    return "claude-code";
-  }
-  if (ua.includes("cursor")) {
-    return "cursor";
-  }
-  if (ua.includes("mozilla") || ua.includes("chrome") || ua.includes("safari") || ua.includes("edge")) {
-    return "browser";
-  }
-  if (ua.includes("node") || ua.includes("python") || ua.includes("curl") || ua.includes("tsx") || ua.includes("postman")) {
-    return "custom-agent";
-  }
-  return "custom-agent";
-}
-
-export function recordTelemetry(
-  env: Env,
-  ctx: ExecutionContext,
-  point: TelemetryPoint
-): void {
-  if (!env.ANALYTICS || typeof env.ANALYTICS.writeDataPoint !== "function") {
-    return;
-  }
-  ctx.waitUntil(
-    (async () => {
-      try {
-        const tenant = point.tenantId || "anonymous";
-        env.ANALYTICS!.writeDataPoint({
-          indexes: [tenant],
-          blobs: [
-            tenant,
-            point.method,
-            point.toolName || "none",
-            point.status,
-            point.clientType || "unknown",
-          ],
-          doubles: [
-            Math.max(0, Math.round(point.executionTimeMs)),
-            point.statusCode,
-            point.costCents !== undefined ? point.costCents : (point.payloadSizeBytes ?? 0),
-          ],
-        });
-      } catch (err) {
-        // Telemetrijas kļūdas nedrīkst pārtraukt pamata izpildi
-        console.error("Telemetry write failed:", err);
-      }
-    })()
-  );
-}
+export type { Env, ExecutionContext, TelemetryPoint, HealthStatus };
+export { detectClientType, recordTelemetry, renderDashboardHtml, TOOL_ALIASES, resolveCanonicalToolName };
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -100,7 +39,8 @@ const CORS_HEADERS = {
 };
 
 export function getToolCostCents(toolName: string): number {
-  switch (toolName) {
+  const canonical = resolveCanonicalToolName(toolName);
+  switch (canonical) {
     case "evaluate_fraud_transaction":
       return 1;
     case "analyze_jev_semantic_ast":
@@ -271,23 +211,43 @@ export default {
       return new Response(null, { headers: CORS_HEADERS });
     }
 
-    // 1. Publiskais veselības pārbaudes maršruts
+    // 1. Publiskais veselības pārbaudes un Midnight Gourmet Dashboard maršruts
     if (url.pathname === "/health" || (url.pathname === "/" && request.method === "GET")) {
+      const healthData: HealthStatus = {
+        status: "healthy",
+        domain: "mcpx.harrykrauze.com",
+        geminiConfigured: !!env.GEMINI_API_KEY,
+        authConfigured: !!(env.MCPX_API_KEY || env.MCPX_KEYS),
+        kvConfigured: !!env.MCPX_KEYS,
+        rateLimiterConfigured: !!env.RATE_LIMITER,
+        analyticsConfigured: !!env.ANALYTICS,
+      };
+
+      const accept = request.headers.get("accept") || "";
+
+      // Ja pieprasījums nāk no pārlūkprogrammas uz saknes ceļu (Accept satur text/html un nesatur application/json)
+      if (url.pathname === "/" && accept.includes("text/html") && !accept.includes("application/json")) {
+        return track(
+          new Response(renderDashboardHtml(healthData), {
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              "Cache-Control": "public, max-age=30, s-maxage=60",
+              ...CORS_HEADERS,
+            },
+          }),
+          { method: "dashboard_html", status: "success" }
+        );
+      }
+
+      // Standarta JSON atbilde aģentiem, cURL un /health maršrutam
       return track(
-        new Response(
-          JSON.stringify({
-            status: "healthy",
-            domain: "mcpx.harrykrauze.com",
-            geminiConfigured: !!env.GEMINI_API_KEY,
-            authConfigured: !!(env.MCPX_API_KEY || env.MCPX_KEYS),
-            kvConfigured: !!env.MCPX_KEYS,
-            rateLimiterConfigured: !!env.RATE_LIMITER,
-            analyticsConfigured: !!env.ANALYTICS,
-          }, null, 2),
-          {
-            headers: { "Content-Type": "application/json; charset=utf-8", ...CORS_HEADERS }
-          }
-        ),
+        new Response(JSON.stringify(healthData, null, 2), {
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            ...CORS_HEADERS,
+          },
+        }),
         { method: "health", status: "success" }
       );
     }
@@ -328,19 +288,19 @@ export default {
 - \`evaluate_fraud_transaction\`: Real-time risk scoring and transaction policy evaluation tool.
 
 ## M2M Monetization & x402 Protocol
-- Discovery operations are 100% free of charge (0 EUR): \`tools/list\`, \`initialize\`, \`notifications/initialized\`, \`ping\`, \`/health\`, \`/llms.txt\`, \`/.well-known/*\`.
+- Discovery operations are 100% free of charge (\$0.00): \`tools/list\`, \`initialize\`, \`notifications/initialized\`, \`ping\`, \`/health\`, \`/llms.txt\`, \`/.well-known/*\`.
 - Per-call metering matrix:
-  - \`evaluate_fraud_transaction\`: 1 cent (€0.01)
-  - \`analyze_jev_semantic_ast\`: 1 cent (€0.01)
-  - \`calculate_u_value_iso6946\`: 2 cents (€0.02)
-  - \`generate_mcp_server\`: 5 cents (€0.05)
-  - \`POST /api/generate\`: 5 cents (€0.05)
+  - \`evaluate_fraud_transaction\`: 1 cent (\$0.01)
+  - \`analyze_jev_semantic_ast\`: 1 cent (\$0.01)
+  - \`calculate_u_value_iso6946\`: 2 cents (\$0.02)
+  - \`generate_mcp_server\`: 5 cents (\$0.05)
+  - \`POST /api/generate\`: 5 cents (\$0.05)
 - Credit exhaustion response:
   - Returns \`HTTP 402 Payment Required\` with L402 challenge header:
     \`WWW-Authenticate: L402 token="mcpx", invoice="https://mcpx.harrykrauze.com/billing/topup?tenant={tenantId}"\`
   - Headers: \`X-MCPX-Tenant\`, \`X-MCPX-Balance-Cents\`, \`X-MCPX-Required-Cents\`.
   - JSON-RPC error code: \`402\`.
-  - Warning header: \`X-MCPX-Low-Balance: true\` when remaining balance < 50 cents.
+  - Warning header: \`X-MCPX-Low-Balance: true\` when remaining balance < 10 cents.
 - Balance topup: Programmatic credit topup via \`POST /keys/topup\` authenticated with \`MCPX_MASTER_KEY\`.
 
 ## Client Integration (Claude Code & Cursor)
@@ -537,11 +497,11 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         const billing: BillingDetails = {
           mode: payload.billingMode || "prepaid",
           balanceCents: initialBalance,
-          currency: "EUR",
+          currency: "USD",
           costPerToolCallCents: 1,
           costPerGenerateCents: 5,
           totalSpentCents: 0,
-          lowBalanceThresholdCents: 50,
+          lowBalanceThresholdCents: 10,
         };
 
         const newApiKey = generateApiKey();
@@ -668,11 +628,11 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             const billing: BillingDetails = record.billing || {
               mode: "prepaid",
               balanceCents: 100,
-              currency: "EUR",
+              currency: "USD",
               costPerToolCallCents: 1,
               costPerGenerateCents: 5,
               totalSpentCents: 0,
-              lowBalanceThresholdCents: 50,
+              lowBalanceThresholdCents: 10,
             };
 
             keysList.push({
@@ -992,11 +952,11 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           record.billing = {
             mode: "prepaid",
             balanceCents: 100,
-            currency: "EUR",
+            currency: "USD",
             costPerToolCallCents: 1,
             costPerGenerateCents: 5,
             totalSpentCents: 0,
-            lowBalanceThresholdCents: 50,
+            lowBalanceThresholdCents: 10,
           };
         }
 
@@ -1005,6 +965,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
 
         await env.MCPX_KEYS.put(`key:${actualKey}`, JSON.stringify(record));
 
+        const currencySymbol = record.billing.currency === "EUR" ? "€" : "$";
         return track(
           new Response(
             JSON.stringify({
@@ -1014,7 +975,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
               billing: record.billing,
               addedCents: payload.amountCents,
               reason: payload.reason || "Manual topup",
-              message: `Successfully topped up ${payload.amountCents} cents (€${(payload.amountCents / 100).toFixed(2)}). New balance: ${record.billing.balanceCents} cents (€${(record.billing.balanceCents / 100).toFixed(2)}).`,
+              message: `Successfully topped up ${payload.amountCents} cents (${currencySymbol}${(payload.amountCents / 100).toFixed(2)}). New balance: ${record.billing.balanceCents} cents (${currencySymbol}${(record.billing.balanceCents / 100).toFixed(2)}).`,
             }),
             { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
           ),
@@ -1027,6 +988,125 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
           ),
           { method: "keys/topup", status: "server_error" }
+        );
+      }
+    }
+
+    // Creem.io Fiat Webhook Vārteja (POST /webhooks/creem)
+    if (url.pathname === "/webhooks/creem") {
+      return handleCreemWebhook(request, env, ctx);
+    }
+
+    // Atslēgas pašapkalpošanās verifikācija un bilances nolasīšana (POST /keys/verify)
+    if (url.pathname === "/keys/verify" && request.method === "POST") {
+      if (!env.MCPX_KEYS) {
+        return track(
+          new Response(
+            JSON.stringify({ error: "Storage not configured on server." }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: "keys/verify", status: "server_error" }
+        );
+      }
+
+      try {
+        const body = (await request.json().catch(() => ({}))) as {
+          key?: string;
+          apiKey?: string;
+          keyId?: string;
+        };
+
+        const targetKey = (body.key || body.apiKey || "").trim();
+        const targetKeyId = (body.keyId || "").trim();
+
+        if (!targetKey && !targetKeyId) {
+          return track(
+            new Response(
+              JSON.stringify({ error: "Bad Request: 'key' or 'keyId' is required." }),
+              { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { method: "keys/verify", status: "client_error" }
+          );
+        }
+
+        let actualKey = targetKey;
+        let rawRecord: string | null = null;
+
+        // 1. Tiešā atslēga key:<targetKey>
+        if (targetKey) {
+          rawRecord = await env.MCPX_KEYS.get(`key:${targetKey}`, "text");
+        }
+
+        // 2. Rādītājs id:<targetKeyId vai targetKey>
+        if (!rawRecord) {
+          const lookupId = targetKeyId || targetKey;
+          const resolved = await env.MCPX_KEYS.get(`id:${lookupId}`, "text");
+          if (resolved) {
+            actualKey = resolved.trim();
+            rawRecord = await env.MCPX_KEYS.get(`key:${actualKey}`, "text");
+          }
+        }
+
+        // 3. Skenēšana pēc keyId
+        if (!rawRecord) {
+          const lookupId = targetKeyId || targetKey;
+          const listRes = await env.MCPX_KEYS.list({ prefix: "key:" });
+          for (const k of listRes.keys) {
+            const candidateRaw = await env.MCPX_KEYS.get(k.name, "text");
+            if (candidateRaw) {
+              try {
+                const candRecord = JSON.parse(candidateRaw.replace(/^\uFEFF/, "").trim()) as ApiKeyRecord;
+                const computedId = candRecord.keyId || (await computeKeyId(k.name.slice(4)));
+                if (candRecord.keyId === lookupId || computedId === lookupId) {
+                  actualKey = k.name.slice(4);
+                  rawRecord = candidateRaw;
+                  break;
+                }
+              } catch {
+                // Turpināt meklēšanu
+              }
+            }
+          }
+        }
+
+        if (!rawRecord) {
+          return track(
+            new Response(
+              JSON.stringify({ error: "Not Found: Invalid API key or keyId not found." }),
+              { status: 404, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { method: "keys/verify", status: "client_error" }
+          );
+        }
+
+        const record = JSON.parse(rawRecord.replace(/^\uFEFF/, "").trim()) as ApiKeyRecord;
+        const keyId = record.keyId || (actualKey ? await computeKeyId(actualKey) : "unknown");
+        const balanceCents = record.billing?.balanceCents ?? 0;
+        const totalSpentCents = record.billing?.totalSpentCents ?? 0;
+
+        return track(
+          new Response(
+            JSON.stringify({
+              success: true,
+              keyId,
+              tenantId: record.tenantId || record.userId,
+              balanceCents,
+              totalSpentCents,
+              status: record.status,
+              plan: record.plan,
+              currency: record.billing?.currency || "USD",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { tenantId: record.tenantId || "anonymous", method: "keys/verify", status: "success" }
+        );
+      } catch (err: any) {
+        return track(
+          new Response(
+            JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
+            { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { method: "keys/verify", status: "server_error" }
         );
       }
     }
@@ -1093,15 +1173,21 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       );
     }
 
-    // 2. Apstrādes un koda ģenerēšanas maršruts (/api/generate, /message, /mcp/messages)
-    if (url.pathname === "/api/generate" || url.pathname === "/message" || url.pathname === "/mcp/messages") {
+    // 2. Apstrādes un koda ģenerēšanas maršruts (/api/generate, /message, /mcp/messages, vai POST /)
+    if (
+      url.pathname === "/api/generate" ||
+      url.pathname === "/message" ||
+      url.pathname === "/mcp/messages" ||
+      (url.pathname === "/" && request.method === "POST")
+    ) {
+      const routeMethod = url.pathname === "/" ? "message" : url.pathname.replace(/^\//, "");
       if (request.method !== "POST") {
         return track(
           new Response(JSON.stringify({ error: "Method Not Allowed. Use POST." }), {
             status: 405,
             headers: { "Content-Type": "application/json", ...CORS_HEADERS },
           }),
-          { method: url.pathname.replace(/^\//, ""), status: "client_error" }
+          { method: routeMethod, status: "client_error" }
         );
       }
 
@@ -1125,7 +1211,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                 },
               }
             ),
-            { method: url.pathname.replace(/^\//, ""), status: "security_violation" }
+            { method: routeMethod, status: "security_violation" }
           );
         }
       }
@@ -1140,7 +1226,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             }),
             { status: 413, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
           ),
-          { method: url.pathname.replace(/^\//, ""), status: "client_error" }
+          { method: routeMethod, status: "client_error" }
         );
       }
 
@@ -1157,7 +1243,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             status: auth.response.status,
             headers,
           }),
-          { method: url.pathname.replace(/^\//, ""), status: isRevoked ? "revoked" : "security_violation" }
+          { method: routeMethod, status: isRevoked ? "revoked" : "security_violation" }
         );
       }
 
@@ -1179,7 +1265,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                 headers: { "Content-Type": "application/json", ...CORS_HEADERS },
               }
             ),
-            { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), status: "security_violation" }
+            { tenantId: activeTenant, method: routeMethod, status: "security_violation" }
           );
         }
       }
@@ -1345,7 +1431,8 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
 
           // MCP Rīku izpilde: tools/call
           if (body.method === "tools/call") {
-            const toolName = body.params?.name;
+            const rawToolName = body.params?.name;
+            const toolName = resolveCanonicalToolName(rawToolName);
             const toolArgs = body.params?.arguments || {};
 
             const validTools = [
@@ -1363,12 +1450,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                     id: reqId,
                     error: {
                       code: -32601,
-                      message: `Unknown tool: '${toolName}'`,
+                      message: `Unknown tool: '${rawToolName || toolName}'`,
                     },
                   }),
                   { status: 200, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
                 ),
-                { tenantId: activeTenant, method: "tools/call", toolName: String(toolName || "none"), status: "client_error" }
+                { tenantId: activeTenant, method: "tools/call", toolName: String(rawToolName || "none"), status: "client_error" }
               );
             }
 
@@ -1613,7 +1700,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         if (auth.context.billing.mode !== "unlimited" && auth.context.billing.balanceCents < cost) {
           return track(
             create402RestResponse(activeTenant, auth.context.billing.balanceCents, cost),
-            { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), toolName: "generate_mcp_server", status: "payment_required", costCents: 0 }
+            { tenantId: activeTenant, method: routeMethod, toolName: "generate_mcp_server", status: "payment_required", costCents: 0 }
           );
         }
 
@@ -1625,7 +1712,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
               JSON.stringify({ error: "Bad Request: 'prompt', 'message', 'input', or 'spec' string is required." }),
               { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
             ),
-            { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), status: "client_error" }
+            { tenantId: activeTenant, method: routeMethod, status: "client_error" }
           );
         }
 
@@ -1663,7 +1750,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
               },
             }
           ),
-          { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), toolName: "generate_mcp_server", status: "success", costCents: cost }
+          { tenantId: activeTenant, method: routeMethod, toolName: "generate_mcp_server", status: "success", costCents: cost }
         );
       } catch (err: any) {
         return track(
@@ -1671,7 +1758,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             JSON.stringify({ error: "Internal Server Error", details: err?.message || String(err) }),
             { status: 500, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
           ),
-          { tenantId: activeTenant, method: url.pathname.replace(/^\//, ""), status: "server_error" }
+          { tenantId: activeTenant, method: routeMethod, status: "server_error" }
         );
       }
     }

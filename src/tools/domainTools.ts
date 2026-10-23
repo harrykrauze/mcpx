@@ -241,3 +241,16 @@ export function analyzeJevSemanticAst(input: JevAstInput): JevAstResult {
     strictness,
   };
 }
+
+// ============================================================================
+// 3. Rīku Sinonīmi un Kanoniskā Nosaukumu Noteikšana (Tool Aliases)
+// ============================================================================
+
+export const TOOL_ALIASES: Record<string, string> = {
+  inspect_ast: "analyze_jev_semantic_ast",
+};
+
+export function resolveCanonicalToolName(name: string | undefined | null): string {
+  if (!name) return "";
+  return TOOL_ALIASES[name] || name;
+}
