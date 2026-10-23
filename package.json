@@ -48,7 +48,11 @@
     "key:revoke": "tsx scripts/manage-keys.ts --action revoke",
     "key:topup": "tsx scripts/manage-keys.ts --action topup",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "tsx test/creem-webhook.test.ts && tsx test/dashboard-and-verify.test.ts",
+    "test:creem": "tsx test/creem-webhook.test.ts",
+    "test:dashboard": "tsx test/dashboard-and-verify.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

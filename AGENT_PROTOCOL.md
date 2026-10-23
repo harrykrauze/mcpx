@@ -59,9 +59,15 @@
 ### GATE 6: `/dream` (Post-Execution Konsolidācija un Aģenta Atmiņa)
 - **Mērķis:** Konsolidēt iegūtās atziņas un sagatavot sistēmu nākamajiem attīstības posmiem.
 - **Prasības:**
-  - Atziņu un arhitektūras lēmumu dokumentēšana.
+  - Atziņu un arhitektūras lēmumu dokumentēšana (`SPEC_GATE6_CREEM_WEBHOOK.md`).
   - Backlog atjaunošana (P3/P4 zema riska uzlabojumi).
   - Aģenta noteikumu un shēmu atjaunināšana.
+  - **USD Centu Standarts:** Bilances, debeti, kredīti un tarifi tiek glabāti un rēķināti TIKAI veselos USD centos (`integer cents`: `balanceCents`, `totalSpentCents`, kur 1 kredīts = 1 cents = $0.01 USD). Decimāldaļas, peldošā komata skaitļi (`float`) un matemātiskā noapaļošana runtime vidē ir kategoriski aizliegta; visi finanšu reģistri ir strikti veseli skaitļi.
+  - **Finanšu Vienību Terminoloģija:** Stingrs aizliegums bilanci saistīt ar LLM žetoniem ("tokens") vai atmiņas apjomu. Vienīgā vienība ir naudas kredīti / USD centi ($).
+  - **Ladder of Trust Likums:** `tools/list`, `initialize`, `/llms.txt`, `/health` un citi atklāšanas pieprasījumi vienmēr ir bezmaksas (`costCents: 0`, $0.00).
+  - **x402 / L402 Pārtveršana:** Pie `balanceCents < toolCost` pieprasījums OBLIGĀTI jāpārtver ar `HTTP 402 Payment Required`, pievienojot galveni `WWW-Authenticate: L402 invoice="..."` un precīzu trūkstošo summu USD centos.
+  - **Brīdinājuma Slieksnis:** Ja bilance pēc debeta ir `< 10` centi ($0.10), atbildē obligāti tiek iekļauta galvene `X-MCPX-Low-Balance: true`.
+  - **Creem.io Webhook Vārteja:** Deterministiska, tipdroša webhook vārteja ar HMAC SHA-256 Web Crypto paraksta verifikāciju un 7 dienu KV idempotences garantiju (`webhook:processed:${id}`).
   - **Asinhronās Telemetrijas Standarts:** Visai telemetrijas reģistrēšanai obligāti jāizmanto `ctx.waitUntil(...)` bez bloķējošas ietekmes uz klienta atbildes laiku (<0.1 ms overhead).
   - **Graceful Degradation:** Telemetrijas nepieejamība (`env.ANALYTICS === undefined` vai kvotu pārtēriņš) nekad nedrīkst izsaukt 500 kļūdu klienta pieprasījumam. Visas kļūdas tiek klusi pārtvertas (`try/catch`).
-  - **Stingra Datu Punktu Shēma (Analytics Engine Contract):** Fiksēt `blob1-5` (tenantId, method, toolName, status, clientType) un `double1-3` (executionTimeMs, statusCode, payloadSizeBytes) un `index1` (tenantId) kā bāzes standartu visiem turpmākajiem malas servisiem.
+  - **Stingra Datu Punktu Shēma (Analytics Engine Contract):** Fiksēt `blob1-5` (tenantId, method, toolName, status, clientType) un `double1-3` (executionTimeMs, statusCode, payloadSizeBytes vai costCents) un `index1` (tenantId) kā bāzes standartu visiem turpmākajiem malas servisiem.

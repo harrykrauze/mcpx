@@ -18,6 +18,7 @@ interface CliArgs {
   rate: number;
   scopes: string[];
   expires?: number;
+  balance?: number;
   url: string;
   masterKey?: string;
 }
@@ -29,12 +30,25 @@ function parseArgs(args: string[]): CliArgs {
   let rate = 10;
   let scopes = ["mcp:read", "mcp:write", "mcp:generate"];
   let expires: number | undefined = undefined;
+  let balance: number | undefined = undefined;
   let url = process.env.TARGET_URL || "https://mcpx.harrykrauze.com";
   let masterKey = process.env.MCPX_MASTER_KEY || process.env.MCPX_API_KEY;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if ((arg === "--tenant" || arg === "-t") && args[i + 1]) {
+    if ((arg === "--name" || arg === "-n") && args[i + 1]) {
+      const n = args[++i];
+      if (!tenant) tenant = n;
+      if (!desc) desc = n;
+    } else if (arg.startsWith("--name=")) {
+      const n = arg.split("=")[1];
+      if (!tenant) tenant = n;
+      if (!desc) desc = n;
+    } else if ((arg === "--balance" || arg === "-b" || arg === "--initialBalance") && args[i + 1]) {
+      balance = parseInt(args[++i], 10);
+    } else if (arg.startsWith("--balance=") || arg.startsWith("--initialBalance=")) {
+      balance = parseInt(arg.split("=")[1], 10);
+    } else if ((arg === "--tenant" || arg === "-t") && args[i + 1]) {
       tenant = args[++i];
     } else if (arg.startsWith("--tenant=")) {
       tenant = arg.split("=")[1];
@@ -86,7 +100,7 @@ function parseArgs(args: string[]): CliArgs {
     tenant = `tenant-cli-${randomSuffix}`;
   }
 
-  return { tenant, desc, plan, rate, scopes, expires, url, masterKey };
+  return { tenant, desc, plan, rate, scopes, expires, balance, url, masterKey };
 }
 
 async function main() {
@@ -98,6 +112,9 @@ async function main() {
   console.log(`  Tenants: ${args.tenant}`);
   if (args.desc) console.log(`  Apraksts: ${args.desc}`);
   console.log(`  Plāns: ${args.plan} | Rate Limit: ${args.rate} req/min`);
+  if (typeof args.balance === "number") {
+    console.log(`  Sākotnējā bilance: $${(args.balance / 100).toFixed(2)} (${args.balance} c / credits)`);
+  }
   console.log(`  Tiesības: ${args.scopes.join(", ")}`);
   if (args.expires) console.log(`  Termiņš: ${args.expires} dienas`);
   console.log(`================================================================\n`);
@@ -108,7 +125,7 @@ async function main() {
     process.exit(1);
   }
 
-  const payload = {
+  const payload: any = {
     tenantId: args.tenant,
     description: args.desc,
     plan: args.plan,
@@ -116,6 +133,9 @@ async function main() {
     scopes: args.scopes,
     expiresInDays: args.expires,
   };
+  if (typeof args.balance === "number") {
+    payload.initialBalanceCents = args.balance;
+  }
 
   const endpoint = `${args.url.replace(/\/+$/, "")}/keys/provision`;
   console.log(`Sūtām pieprasījumu uz: ${endpoint}...`);
@@ -139,7 +159,11 @@ async function main() {
     const data = (await res.json()) as any;
     console.log("\n✅ ATSLĒGA VEIKSMĪGI IZVEIDOTA!\n");
     console.log(`  API Atslēga:  ${data.apiKey}`);
+    if (data.keyId) console.log(`  Key ID:       ${data.keyId}`);
     console.log(`  Tenant ID:    ${data.tenantId || data.userId}`);
+    if (data.billing) {
+      console.log(`  Bilance:      $${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} credits / cents)`);
+    }
     console.log(`  Plāns:        ${data.plan}`);
     console.log(`  Statuss:      ${data.status}`);
     console.log(`  Rate Limit:   ${data.rateLimit} req/min`);

@@ -2,13 +2,13 @@ export type BillingMode = "prepaid" | "postpaid" | "unlimited";
 
 export interface BillingDetails {
   mode: BillingMode;
-  balanceCents: number;             // Vesels skaitlis (eirocenti), novēršot peldošā punkta kļūdas
-  currency: "EUR";
-  costPerToolCallCents: number;     // Bāzes cena standarta rīkam (noklusētā: 1 cents)
-  costPerGenerateCents: number;     // Cena koda ģenerēšanai (noklusētā: 5 centi)
+  balanceCents: number;             // Vesels skaitlis (USD centi), novēršot peldošā punkta kļūdas
+  currency: "USD" | "EUR";
+  costPerToolCallCents: number;     // Bāzes cena standarta rīkam (noklusētā: 1 cents = $0.01)
+  costPerGenerateCents: number;     // Cena koda ģenerēšanai (noklusētā: 5 centi = $0.05)
   totalSpentCents: number;          // Vēsturiskais kopējais patēriņš
   lastTopupAt?: string;             // ISO 8601 laika zīmogs
-  lowBalanceThresholdCents: number; // Slieksnis brīdinājuma galvenei (noklusētais: 50 centi)
+  lowBalanceThresholdCents: number; // Slieksnis brīdinājuma galvenei (noklusētais: 10 centi = $0.10)
 }
 
 export interface ProvisionKeyPayload {
@@ -67,6 +67,7 @@ export interface Env {
   MCPX_MASTER_KEY?: string;
   MCPX_API_KEY?: string;
   JWT_SECRET?: string;
+  CREEM_WEBHOOK_SECRET?: string;
   MCPX_KEYS: KVNamespace;
   ENVIRONMENT?: string;
   ISSUER_URL?: string;
@@ -75,6 +76,76 @@ export interface Env {
     limit: (options: { key: string }) => Promise<{ success: boolean }>;
   };
   ANALYTICS?: AnalyticsEngineDataset;
+}
+
+export interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+  passThroughOnException(): void;
+}
+
+export interface TelemetryPoint {
+  tenantId?: string;
+  method: string;
+  toolName?: string;
+  status: "success" | "timeout" | "security_violation" | "client_error" | "revoked" | "server_error" | "payment_required";
+  clientType?: string;
+  executionTimeMs: number;
+  statusCode: number;
+  payloadSizeBytes?: number;
+  costCents?: number;
+}
+
+export function detectClientType(userAgent: string | null): string {
+  if (!userAgent) return "unknown";
+  const ua = userAgent.toLowerCase();
+  if (ua.includes("claude-code") || ua.includes("claudecode") || ua.includes("claude")) {
+    return "claude-code";
+  }
+  if (ua.includes("cursor")) {
+    return "cursor";
+  }
+  if (ua.includes("mozilla") || ua.includes("chrome") || ua.includes("safari") || ua.includes("edge")) {
+    return "browser";
+  }
+  if (ua.includes("node") || ua.includes("python") || ua.includes("curl") || ua.includes("tsx") || ua.includes("postman")) {
+    return "custom-agent";
+  }
+  return "custom-agent";
+}
+
+export function recordTelemetry(
+  env: Env,
+  ctx: ExecutionContext,
+  point: TelemetryPoint
+): void {
+  if (!env.ANALYTICS || typeof env.ANALYTICS.writeDataPoint !== "function") {
+    return;
+  }
+  ctx.waitUntil(
+    (async () => {
+      try {
+        const tenant = point.tenantId || "anonymous";
+        env.ANALYTICS!.writeDataPoint({
+          indexes: [tenant],
+          blobs: [
+            tenant,
+            point.method,
+            point.toolName || "none",
+            point.status,
+            point.clientType || "unknown",
+          ],
+          doubles: [
+            Math.max(0, Math.round(point.executionTimeMs)),
+            point.statusCode,
+            point.costCents !== undefined ? point.costCents : (point.payloadSizeBytes ?? 0),
+          ],
+        });
+      } catch (err) {
+        // Telemetrijas kļūdas nedrīkst pārtraukt pamata izpildi
+        console.error("Telemetry write failed:", err);
+      }
+    })()
+  );
 }
 
 export interface AuthContext {
@@ -316,7 +387,7 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
           billing: {
             mode: "unlimited",
             balanceCents: 999999,
-            currency: "EUR",
+            currency: "USD",
             costPerToolCallCents: 1,
             costPerGenerateCents: 5,
             totalSpentCents: 0,
@@ -341,7 +412,7 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
             billing: {
               mode: "unlimited",
               balanceCents: 999999,
-              currency: "EUR",
+              currency: "USD",
               costPerToolCallCents: 1,
               costPerGenerateCents: 5,
               totalSpentCents: 0,
@@ -408,7 +479,7 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
             const billing: BillingDetails = record.billing || {
               mode: "prepaid",
               balanceCents: 100,
-              currency: "EUR",
+              currency: "USD",
               costPerToolCallCents: 1,
               costPerGenerateCents: 5,
               totalSpentCents: 0,

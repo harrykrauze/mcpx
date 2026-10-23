@@ -37,3 +37,10 @@
   - `blobs`: `[blob1: tenantId, blob2: method, blob3: toolName, blob4: status, blob5: clientType]`
   - `doubles`: `[double1: executionTimeMs, double2: statusCode, double3: payloadSizeBytes]`
   - Šī shēma ir saistoša visiem turpmākajiem malas servisiem un mikroservisiem `mcpx` ekosistēmā.
+
+## 7. USD Centu Finanšu Standarts & x402 Monetizācija
+- **USD Centu standarts:** Bilances, debeti, kredīti un tarifi tiek glabāti un rēķināti TIKAI veselos USD centos (`integer cents`: `balanceCents`, `totalSpentCents`, kur 1 kredīts = 1 cents = $0.01 USD). Decimāldaļas, peldošā komata skaitļi (`float`) un matemātiskā noapaļošana runtime vidē ir kategoriski aizliegta; visi finanšu reģistri ir strikti veseli skaitļi.
+- **Finanšu vienību terminoloģija:** Stingrs aizliegums bilanci saistīt ar LLM žetoniem ("tokens") vai atmiņas apjomu. Vienīgā vienība ir naudas kredīti / USD centi ($).
+- **Ladder of Trust likums:** `tools/list`, `initialize`, `/llms.txt`, `/health` un citi atklāšanas pieprasījumi vienmēr ir bezmaksas (`costCents: 0`, $0.00).
+- **x402 / L402 pārtveršana:** Pie `balanceCents < toolCost` pieprasījums OBLIGĀTI jāpārtver ar `HTTP 402 Payment Required`, pievienojot galveni `WWW-Authenticate: L402 invoice="..."` un precīzu trūkstošo summu USD centos.
+- **Brīdinājuma slieksnis:** Ja bilance pēc debeta ir `< 10` centi ($0.10), atbildē obligāti tiek iekļauta galvene `X-MCPX-Low-Balance: true`.

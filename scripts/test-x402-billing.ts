@@ -99,7 +99,7 @@ async function main() {
       throw new Error(`Gaidīta bilance 3 centi, saņemts: ${JSON.stringify(data.billing)}`);
     }
 
-    return `Izveidota atslēga ${createdApiKey.slice(0, 14)}... ar keyId: ${createdKeyId} | Sākotnējā bilance: €${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} c)`;
+    return `Izveidota atslēga ${createdApiKey.slice(0, 14)}... ar keyId: ${createdKeyId} | Sākotnējā bilance: $${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} c)`;
   });
 
   // [B.2] Bezmaksas operācijas (tools/list)
@@ -144,7 +144,7 @@ async function main() {
       throw new Error(`tools/list atskaitīja kredītus! Bilance ir ${statusData.billing?.balanceCents}, gaidīta 3`);
     }
 
-    return `tools/list sekmīgs (pieejami ${listData.result.tools.length} rīki) | Bilance paliek nemainīga: €0.03 (3 c)`;
+    return `tools/list sekmīgs (pieejami ${listData.result.tools.length} rīki) | Bilance paliek nemainīga: $0.03 (3 c)`;
   });
 
   // [B.3] 1 centa rīka izsaukums (evaluate_fraud_transaction)
@@ -334,7 +334,7 @@ async function main() {
       throw new Error(`Gaidīta bilance 500 centi, saņemts: ${data.billing?.balanceCents}`);
     }
 
-    return `Papildināts par €${(data.addedCents / 100).toFixed(2)} (${data.addedCents} c) | Jaunā bilance: €${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} c)`;
+    return `Papildināts par $${(data.addedCents / 100).toFixed(2)} (${data.addedCents} c) | Jaunā bilance: $${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} c)`;
   });
 
   // [B.8] Izpildes atjaunošanās ar maksas rīku (generate_mcp_server, maksa 5 centi)
@@ -373,7 +373,7 @@ async function main() {
       throw new Error(`JSON-RPC kļūda: ${JSON.stringify(callData.error)}`);
     }
 
-    return `generate_mcp_server veiksmīgi izpildīts (maksa 5 c) | Bilance: €${(Number(balanceHeader) / 100).toFixed(2)} (${balanceHeader} c)`;
+    return `generate_mcp_server veiksmīgi izpildīts (maksa 5 c) | Bilance: $${(Number(balanceHeader) / 100).toFixed(2)} (${balanceHeader} c)`;
   });
 
   // Sakopšana (Cleanup)
