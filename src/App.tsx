@@ -5,6 +5,7 @@ import { CodeViewer } from './components/CodeViewer';
 import { SetupGuideModal } from './components/SetupGuideModal';
 import { BlueprintModal } from './components/BlueprintModal';
 import { ToolPlayground } from './components/ToolPlayground';
+import { McpxGatewayView } from './components/McpxGatewayView';
 import { McpLanguage, McpServerResponse, PresetSnippet } from './types/mcp';
 import { PRESET_SNIPPETS } from './constants/presets';
 import { AlertCircle, History, Sparkles, CheckCircle2, ArrowRight, CreditCard } from 'lucide-react';
@@ -177,9 +178,19 @@ export default function App() {
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col space-y-4">
-        {/* Banner with quick summary and protocol badge */}
-        <div className="rounded-xl bg-gradient-to-r from-indigo-950/40 via-purple-950/20 to-zinc-900 border border-indigo-900/30 p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col space-y-10">
+        {/* Mcpx Edge Gateway Landing & x402 Calculator */}
+        <McpxGatewayView />
+
+        {/* Studio Heading & MCP Generator Workspace */}
+        <div className="pt-8 border-t border-zinc-800 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold text-white tracking-tight">MCP Server Generator Studio</h2>
+            <span className="text-xs font-mono text-zinc-400">cURL / OpenAPI &rarr; FastMCP</span>
+          </div>
+
+          {/* Banner with quick summary and protocol badge */}
+          <div className="rounded-xl bg-gradient-to-r from-indigo-950/40 via-purple-950/20 to-zinc-900 border border-indigo-900/30 p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
           <div className="flex items-center gap-3">
             <div className="w-2 h-2 rounded-full bg-indigo-400 animate-ping hidden sm:block" />
             <div>
@@ -382,6 +393,7 @@ export default function App() {
             </div>
           </div>
         )}
+        </div>
       </main>
 
       {/* Modals */}

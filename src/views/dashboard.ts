@@ -23,78 +23,36 @@ export function renderDashboardHtml(health: HealthStatus): string {
     "@graph": [
       {
         "@type": "SoftwareApplication",
-        "@id": "https://mcpx.harrykrauze.com/#software",
-        "name": "mcpx gateway",
-        "alternateName": "mcpx Deterministic MCP Edge Gateway",
-        "url": "https://mcpx.harrykrauze.com/",
+        "@id": "https://mcpx.harrykrauze.com/#application",
+        "name": "mcpx Edge Gateway",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Cloudflare Workers V8 Mesh",
-        "description": "Deterministic Model Context Protocol (MCP) Edge Gateway with native x402 machine billing, AST syntax parsing, and isolated V8 sandbox execution.",
+        "url": "https://mcpx.harrykrauze.com",
+        "description": "Deterministic Model Context Protocol Edge Gateway with native x402 machine billing and V8 sandboxed isolation.",
+        "softwareVersion": "1.0.0",
+        "offers": {
+          "@type": "AggregateOffer",
+          "priceCurrency": "USD",
+          "lowPrice": "0.00",
+          "highPrice": "0.05",
+          "offerCount": "4"
+        },
         "creator": {
           "@type": "Person",
           "@id": "https://harrykrauze.com/#person",
           "name": "Harry Krauze",
-          "url": "https://harrykrauze.com/"
-        },
-        "offers": [
-          {
-            "@type": "Offer",
-            "name": "Discovery Free Tier",
-            "description": "tools/list, initialize, /llms.txt",
-            "price": "0.00",
-            "priceCurrency": "USD"
-          },
-          {
-            "@type": "Offer",
-            "name": "AST Security Check",
-            "description": "analyze_jev_semantic_ast (1 credit)",
-            "price": "0.01",
-            "priceCurrency": "USD"
-          },
-          {
-            "@type": "Offer",
-            "name": "Fraud Risk Scoring",
-            "description": "evaluate_fraud_transaction (1 credit)",
-            "price": "0.01",
-            "priceCurrency": "USD"
-          },
-          {
-            "@type": "Offer",
-            "name": "Building Physics ISO 6946",
-            "description": "calculate_u_value_iso6946 (2 credits)",
-            "price": "0.02",
-            "priceCurrency": "USD"
-          },
-          {
-            "@type": "Offer",
-            "name": "FastMCP Server Generator",
-            "description": "generate_mcp_server (5 credits)",
-            "price": "0.05",
-            "priceCurrency": "USD"
-          }
-        ]
+          "url": "https://harrykrauze.com"
+        }
       },
       {
-        "@type": "FAQPage",
-        "@id": "https://mcpx.harrykrauze.com/#faq",
-        "mainEntity": [
-          {
-            "@type": "Question",
-            "name": "What is mcpx gateway?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "mcpx is a deterministic Model Context Protocol (MCP) Edge Gateway deployed on the Cloudflare V8 Mesh with native x402 machine-to-machine billing and isolated sandbox execution."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "How does x402 machine billing work?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "mcpx uses a deterministic Ladder of Trust credit matrix: discovery operations are free ($0.00), lightweight security/fraud checks cost $0.01 (1 credit), building physics ISO 6946 calculations cost $0.02 (2 credits), and MCP server code generation costs $0.05 (5 credits)."
-            }
-          }
-        ]
+        "@type": "WebSite",
+        "@id": "https://mcpx.harrykrauze.com/#website",
+        "url": "https://mcpx.harrykrauze.com",
+        "name": "mcpx Gateway",
+        "publisher": {
+          "@type": "Person",
+          "name": "Harry Krauze"
+        }
       }
     ]
   }
@@ -303,7 +261,7 @@ export function renderDashboardHtml(health: HealthStatus): string {
         <div style="margin-top: 1.5rem; border-top: 1px solid var(--border); padding-top: 1rem;">
           <p style="font-size: 0.9rem; font-weight: 600; color: #fff;">Instant Credit Top-Up (Creem.io Webhook):</p>
           <div class="topup-tier-grid">
-            <a href="#" id="topup-10" target="_blank" class="topup-btn">
+            <a href="https://checkout.creem.io/p/mcpx-tier1" id="topup-10" target="_blank" class="topup-btn">
               <span class="amount">$10</span>
               <span class="credits">1,000 credits</span>
             </a>

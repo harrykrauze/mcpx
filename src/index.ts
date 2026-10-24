@@ -18,6 +18,7 @@ import {
   DailyAuditSummary,
   detectClientType,
   recordTelemetry,
+  KVNamespace,
 } from "./auth";
 import { generateMcpSpec } from "./gemini";
 import {
@@ -55,11 +56,11 @@ mcpx bridges autonomous LLM agents and edge tooling via isolated V8 execution en
 ## x402 Pricing Matrix (Ladder of Trust)
 | Operation Tier | MCP Methods / Scope | Rate (USD) | Credit Cost | Trust Tier |
 | :--- | :--- | :--- | :--- | :--- |
-| Discovery | \`tools/list\`, \`initialize\`, \`/llms.txt\` | \$0.00 | 0 credits | Discovery Free Tier |
-| Tier 1: AST Security | \`analyze_jev_semantic_ast\` | \$0.01 | 1 credit | Agent Work Session |
-| Tier 1: Fraud Risk | \`evaluate_fraud_transaction\` | \$0.01 | 1 credit | Real-time Decisioning |
-| Tier 2: Physics | \`calculate_u_value_iso6946\` | \$0.02 | 2 credits | ISO Standards Engine |
-| Tier 3: Compiler | \`generate_mcp_server\` | \$0.05 | 5 credits | Full Synthesis Cycle |
+| Discovery Tier | \`tools/list\`, \`initialize\`, \`/llms.txt\` | \$0.00 | 0 credits | Discovery Free Tier (0 credits / free) |
+| Session Analysis | \`analyze_jev_semantic_ast\` | \$0.01 | 1 credit | Session Analysis (\$0.01 / 1 credit) |
+| Fraud Risk | \`evaluate_fraud_transaction\` | \$0.01 | 1 credit | Real-time Decisioning |
+| Deep Calculations | \`calculate_u_value_iso6946\` | \$0.02 | 2 credits | Deep Calculations (\$0.02 / 2 credits) |
+| Edge Sandbox Run | \`generate_mcp_server\` | \$0.05 | 5 credits | Edge Sandbox Run (\$0.05 / 5 credits) |
 
 ## Gateway Endpoints
 - MCP Remote SSE Endpoint: \`GET https://mcpx.harrykrauze.com/mcp/sse\`
@@ -72,6 +73,7 @@ mcpx bridges autonomous LLM agents and edge tooling via isolated V8 execution en
 1. Pass bearer token: \`Authorization: Bearer mcpx_live_<token>\`
 2. Free discovery calls (\`tools/list\`, \`initialize\`, \`/llms.txt\`) require zero balance and deduct 0 credits.
 3. If balance is insufficient for Tier 1–3 tools, the gateway emits \`HTTP 402 Payment Required\` with \`WWW-Authenticate: L402\` and top-up checkout metadata.
+4. HTTP 402 Creem top-up resolution URL: https://checkout.creem.io/p/mcpx-tier1
 
 ## Client Integration (Claude Desktop, Claude Code & Cursor)
 
@@ -327,6 +329,30 @@ export async function deductCredits(
     balanceCents: newBalance,
     lowBalance: newBalance < billing.lowBalanceThresholdCents,
   };
+}
+
+export async function verifyKeyInKv(
+  kv: KVNamespace | undefined,
+  rawKey: string
+): Promise<{ keyId?: string; tenantId?: string; balanceCents: number; status: string } | null> {
+  if (!kv || !rawKey) return null;
+  try {
+    const rawRecord = await kv.get(`key:${rawKey}`, "text");
+    if (!rawRecord) return null;
+    const cleaned = rawRecord.replace(/^\uFEFF/, "").trim();
+    const record = JSON.parse(cleaned) as any;
+    if (!record) return null;
+    const rawBalance = record.balanceCents ?? record.billing?.balanceCents ?? 0;
+    const status = String(record.status || "active").toUpperCase();
+    return {
+      keyId: record.keyId || (record.userId ? `key_${record.userId}` : "unknown"),
+      tenantId: record.tenantId || record.userId || "anonymous",
+      balanceCents: Number(rawBalance) || 0,
+      status,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function create402RestResponse(
@@ -1355,6 +1381,51 @@ export default {
     // Creem.io Fiat Webhook Gateway (POST /webhooks/creem)
     if (url.pathname === "/webhooks/creem") {
       return handleCreemWebhook(request, env, ctx);
+    }
+
+    // Route alias: GET /api/v1/balance -> Verify Bearer Token
+    if (url.pathname === "/api/v1/balance" && request.method === "GET") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const match = authHeader.match(/^Bearer\s+(.+)$/i);
+
+      if (!match) {
+        return track(
+          new Response(JSON.stringify({ error: "Missing or malformed Authorization header", credits: 0 }), {
+            status: 401,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          }),
+          { method: "api/v1/balance", status: "security_violation" }
+        );
+      }
+
+      const rawKey = match[1].trim();
+      const keyRecord = await verifyKeyInKv(env.MCPX_KEYS, rawKey);
+
+      if (!keyRecord || keyRecord.status !== "ACTIVE") {
+        return track(
+          new Response(JSON.stringify({ error: "Invalid or revoked API key", credits: 0 }), {
+            status: 403,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          }),
+          { method: "api/v1/balance", status: "security_violation" }
+        );
+      }
+
+      return track(
+        new Response(
+          JSON.stringify({
+            keyId: keyRecord.keyId,
+            tenantId: keyRecord.tenantId,
+            credits: keyRecord.balanceCents,
+            status: keyRecord.status,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          }
+        ),
+        { tenantId: keyRecord.tenantId, method: "api/v1/balance", status: "success" }
+      );
     }
 
     // Key self-service verification and balance inspection (POST /keys/verify)
