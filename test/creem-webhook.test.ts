@@ -110,11 +110,18 @@ function createMockCtx(): ExecutionContext {
   };
 }
 
+const recordedAnalyticsPoints: any[] = [];
+
 function createMockEnv(kv: InMemoryKV): Env {
   return {
     GEMINI_API_KEY: "mock_gemini_key",
     CREEM_WEBHOOK_SECRET: TEST_WEBHOOK_SECRET,
     MCPX_KEYS: kv,
+    ANALYTICS: {
+      writeDataPoint: (point: any) => {
+        recordedAnalyticsPoints.push(point);
+      },
+    },
   };
 }
 
@@ -286,7 +293,16 @@ it("C.3", "Derīga 'checkout.completed' apstrāde un bilances papildināšana (H
     throw new Error(`Idempotences atslēga 'webhook:processed:${payload.id}' netika saglabāta KV!`);
   }
 
-  return `Bilance papildināta par €10.00 (1000 c) -> Jaunā bilance: €10.50 (1050 c)`;
+  // Pārbaudām Analytics Engine telemetrijas ierakstu
+  const topupPoint = recordedAnalyticsPoints.find((p) => p.blobs?.[0] === "creem.topup");
+  if (!topupPoint) {
+    throw new Error("Analytics Engine datu punkts ar 'creem.topup' netika ierakstīts!");
+  }
+  if (topupPoint.doubles?.[0] !== 1000 || topupPoint.doubles?.[2] !== 1050) {
+    throw new Error(`Nepareizi Analytics Engine skaitliskie dati: ${JSON.stringify(topupPoint.doubles)}`);
+  }
+
+  return `Bilance papildināta par €10.00 (1000 c) -> Jaunā bilance: €10.50 (1050 c) (Analytics verificēts)`;
 });
 
 // 4. Tests: Idempotence pie dubultiem pieprasījumiem

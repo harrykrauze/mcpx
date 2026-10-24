@@ -269,6 +269,11 @@ export async function handleCreemWebhook(
   // 8. Saglabājam idempotences atslēgu ar TTL 7 dienas (604800 sek.)
   const resolvedKeyId = record.keyId || targetKeyId || (await computeKeyId(actualKey));
   const resolvedTenantId = record.tenantId || record.userId;
+  const tenantId = resolvedTenantId;
+  const keyId = resolvedKeyId;
+  const orderId = payload.data?.order_id || payload.data?.id || "";
+  const addedCents = amount;
+  const newBalanceCents = record.billing.balanceCents;
 
   await env.MCPX_KEYS.put(
     idempotencyKey,
@@ -282,7 +287,31 @@ export async function handleCreemWebhook(
     { expirationTtl: 604800 }
   );
 
-  // 9. Asinhronā telemetrija: creem_fiat_topup
+  // 9. Reāllaika telemetrija: Cloudflare Analytics Engine (dataset: mcpx_telemetry)
+  if (env.ANALYTICS) {
+    try {
+      env.ANALYTICS.writeDataPoint({
+        blobs: [
+          "creem.topup",                         // blob1: Notikuma tips
+          tenantId || "unknown",                 // blob2: Tenant ID
+          keyId || "unknown",                    // blob3: Key ID / Hash
+          payload.data?.currency || "USD",       // blob4: Valūta
+          orderId || payload.data?.id || "",     // blob5: Pasūtījuma ID
+          payload.id                             // blob6: Creem notikuma ID
+        ],
+        doubles: [
+          addedCents,                            // double1: Pievienotie centi (piem., 2500)
+          addedCents / 100,                      // double2: Summa USD (piem., 25.00)
+          newBalanceCents                        // double3: Jaunā kopējā bilance centos
+        ],
+        indexes: [tenantId || keyId || "mcpx"]  // index1: Ātrai filtrēšanai pēc klienta
+      });
+    } catch (analyticsErr) {
+      console.warn("Neizdevās reģistrēt Analytics Engine telemetriju:", analyticsErr);
+    }
+  }
+
+  // 10. Asinhronā telemetrija: creem_fiat_topup
   const executionTimeMs = Date.now() - startTime;
   recordTelemetry(env, ctx, {
     tenantId: resolvedTenantId,
