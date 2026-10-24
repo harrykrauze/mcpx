@@ -1,99 +1,27 @@
 <div align="center">
-  <img width="1200" height="475" alt="MCP Server Generator Banner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+  <img width="1200" height="475" alt="mcpx Gateway Banner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# MCP Server Generator
+# mcpx — Edge-Native Model Context Protocol Gateway
 
-> Deterministic, TypeSafe Model Context Protocol (MCP) server generator. Transform cURL commands, OpenAPI 3.0/3.1 specifications, and API schemas into production-ready MCP servers for AI agents (Claude, Cursor, Antigravity).
-
----
-
-## Features
-
-- **Multi-Format Input:** Ingest cURL requests, OpenAPI 3.0/3.1 definitions, Swagger YAML/JSON, or raw JSON schemas.
-- **Dual Language Targets:**
-  - **TypeScript:** Built with `@modelcontextprotocol/sdk` and strict `zod` input validation schemas.
-  - **Python:** Built with `FastMCP` / `mcp.server` and typed `pydantic` models.
-- **Security & Best Practices:** Automatic extraction of tokens and headers into environment variables (`.env.example`). No hardcoded secrets.
-- **AI-Powered & Deterministic Fallback:** Powered by Google Gemini (`gemini-3.8-flash` / `gemini-2.5-flash`) with an instant deterministic regex parsing fallback if offline or unauthenticated.
-- **Interactive Simulator:** Test generated MCP JSON-RPC 2.0 tool calls directly in the browser playground.
-- **One-Click Export:** Download a complete, runnable server bundle as a `.zip` archive.
+Deterministic AST code inspection, V8 sandboxed execution, and prepaid L402/x402 micro-metering deployed on Cloudflare Workers.
 
 ---
 
-## Tech Stack
+## Architecture & Primitives
 
-- **Frontend:** React 19, Vite 8, Tailwind CSS v4, Lucide Icons, Framer Motion
-- **Backend:** Express, TypeScript, `@google/genai` SDK
-- **Runtime:** Node.js (v18+)
-
----
-
-## Quick Start
-
-### 1. Install Dependencies
-```bash
-npm install
-```
-
-### 2. Configure Environment Variables
-Copy `.env.example` to `.env` and provide your Gemini API key:
-```bash
-cp .env.example .env
-```
-Edit `.env`:
-```env
-GEMINI_API_KEY="your-gemini-api-key-here"
-```
-
-### 3. Run Development Server
-```bash
-npm run dev
-```
-Open your browser at `http://localhost:3000`.
+- **AST Validation Gateway:** Static syntax and AST safety audits for TypeScript and JavaScript before LLM execution ($0.01 / 1 credit).
+- **V8 Sandbox Execution:** Deterministic edge runtime for evaluating pure computational code blocks ($0.05 / 5 credits).
+- **Prepaid x402 Protocol:** Pay-per-call micro-billing backed by Cloudflare KV and Creem.io Merchant of Record.
+- **Zero-Latency Telemetry:** Asynchronous payment and event logging via Cloudflare Workers Analytics Engine.
 
 ---
 
-## Available Scripts
+## Client Integration
 
-| Command | Description |
-|---|---|
-| `npm run dev` | Starts the Express server and Vite development middleware |
-| `npm run build` | Compiles the production frontend bundle into `dist/` |
-| `npm run start` | Runs the production backend with prebuilt assets |
-| `npm run lint` | Runs type verification (`tsc --noEmit`) |
-| `npm run test:client-connection` | Runs live MCP client SSE & tools/list verification against production |
-| `npm run test:live-smoke` | Runs production edge gateway live smoke tests |
-| `npm run clean` | Removes build artifacts (`dist`, `server.js`) |
+### 1. Claude Code
+Pievieno `mcpx` serveri failā `~/.claude.json` vai sava projekta `.claude/config.json`:
 
----
-
-## Klientu Pieslēgšana (Claude Code & Cursor)
-
-`mcpx` nodrošina attālinātu pieslēgumu AI izstrādes aģentiem caur **Model Context Protocol (MCP)** Server-Sent Events (SSE) transportu ar Bearer autorizāciju.
-
-### 1. Claude Code (CLI)
-Pievienojiet `mcpx` serveri tieši caur termināli:
-```bash
-claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <TAVA_MCPX_API_ATSLĒGA>"
-```
-
-Vai pievienojiet projekta `.mcp.json` (vai globālajā `~/.claude.json`):
-```json
-{
-  "mcpServers": {
-    "mcpx": {
-      "url": "https://mcpx.harrykrauze.com/mcp/sse",
-      "headers": {
-        "Authorization": "Bearer ${MCPX_API_KEY}"
-      }
-    }
-  }
-}
-```
-
-### 2. Cursor IDE
-Izveidojiet failu `.cursor/mcp.json` projekta saknē:
 ```json
 {
   "mcpServers": {
@@ -107,10 +35,66 @@ Izveidojiet failu `.cursor/mcp.json` projekta saknē:
 }
 ```
 
-Gatavi konfigurācijas šabloni un atslēgu provisionēšanas ceļvedis atrodams mapē [`examples/clients/`](examples/clients/README.md).
+### 2. Cursor IDE
+Dodies uz **Cursor Settings > Features > MCP**, spied **Add New MCP Server**:
+- **Name:** `mcpx`
+- **Type:** `sse`
+- **URL:** `https://mcpx.harrykrauze.com/mcp/sse`
+
+Pievieno autorizācijas galveni ar savu atslēgu:
+```text
+Authorization: Bearer YOUR_MCPX_API_KEY
+```
+
+### 3. Windsurf / Codeium Cascade
+Failā `~/.codeium/windsurf/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "mcpx": {
+      "serverUrl": "https://mcpx.harrykrauze.com/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCPX_API_KEY"
+      }
+    }
+  }
+}
+```
 
 ---
 
-## License
+## Micro-Metering & x402 Billing Matrix
 
-MIT
+| Operation | Unit Cost | Description |
+| :--- | :--- | :--- |
+| `ast_check` | **$0.01** (1 credit) | Deterministic syntax, regex injection, and AST linting |
+| `v8_execute` | **$0.05** (5 credits) | Isolated V8 micro-sandbox evaluation |
+| `health` / `keys/verify` | **Free** ($0.00) | Infrastructure status and active balance query |
+
+Ja bilance sasniedz `0`, vārteja atgriež standarta **HTTP 402 Payment Required** atbildi ar tiešu Creem.io papildināšanas saiti.
+
+---
+
+## Top-Up & Key Management
+
+Kredītu papildināšana pieejama tieši caur [mcpx.harrykrauze.com](https://mcpx.harrykrauze.com):
+- **$10.00** — 1,000 kredīti (1,000 AST pārbaudes / 200 V8 izpildes)
+- **$25.00** — 2,500 kredīti (2,500 AST pārbaudes / 500 V8 izpildes)
+- **$50.00** — 5,000 kredīti (5,000 AST pārbaudes / 1,000 V8 izpildes)
+
+---
+
+## CLI & Local Development
+
+```bash
+# Atkarību instalēšana
+npm ci --legacy-peer-deps
+
+# Tipu pārbaude un vienībtesti
+npm run typecheck
+npm test
+
+# Lokālā izpilde
+npx wrangler dev
+```
