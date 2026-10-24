@@ -1239,6 +1239,151 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       );
     }
 
+    // 1c. Tiešā REST rīku izpildes vārteja (POST /tools/execute)
+    if (url.pathname === "/tools/execute" && request.method === "POST") {
+      const auth = await requireAuth(request, env);
+      if (!auth.authorized) {
+        const headers = new Headers(auth.response.headers);
+        for (const [k, v] of Object.entries(CORS_HEADERS)) {
+          headers.set(k, v);
+        }
+        return track(new Response(auth.response.body, { status: auth.response.status, headers }), {
+          method: "tools/execute",
+          status: "client_error",
+        });
+      }
+
+      const activeTenant = auth.context.tenantId || auth.context.userId || "anonymous";
+
+      try {
+        const body = (await request.json().catch(() => ({}))) as {
+          tool?: string;
+          name?: string;
+          parameters?: any;
+          arguments?: any;
+        };
+
+        const rawTool = body.tool || body.name || "";
+        const toolName = resolveCanonicalToolName(rawTool);
+        const toolArgs = body.parameters || body.arguments || {};
+
+        const validTools = [
+          "calculate_u_value_iso6946",
+          "analyze_jev_semantic_ast",
+          "generate_mcp_server",
+          "evaluate_fraud_transaction",
+        ];
+
+        if (!toolName || !validTools.includes(toolName)) {
+          return track(
+            new Response(
+              JSON.stringify({
+                error: `Unknown tool: '${rawTool || toolName}'`,
+                supportedTools: validTools,
+              }),
+              { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+            ),
+            { tenantId: activeTenant, method: "tools/execute", toolName: String(rawTool || "none"), status: "client_error" }
+          );
+        }
+
+        const cost = getToolCostCents(toolName);
+        if (auth.context.billing.mode !== "unlimited" && auth.context.billing.balanceCents < cost) {
+          return track(
+            create402RestResponse(activeTenant, auth.context.billing.balanceCents, cost),
+            { tenantId: activeTenant, method: "tools/execute", toolName, status: "payment_required", costCents: 0 }
+          );
+        }
+
+        const { balanceCents, lowBalance } = await deductCredits(
+          env,
+          auth.context.apiKey,
+          auth.context.billing,
+          cost
+        );
+        const billingHeaders: Record<string, string> = {
+          "X-MCPX-Balance-Cents": String(balanceCents),
+          ...(lowBalance ? { "X-MCPX-Low-Balance": "true" } : {}),
+        };
+
+        if (toolName === "analyze_jev_semantic_ast") {
+          const result = analyzeJevSemanticAst({
+            code: toolArgs.code || "",
+            strictness: toolArgs.strictness || "standard",
+          });
+          return track(
+            new Response(
+              JSON.stringify({
+                success: result.verdict === "SAFE" || result.verdict === "WARNING",
+                valid: result.verdict === "SAFE",
+                ...result,
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json", ...billingHeaders, ...CORS_HEADERS },
+              }
+            ),
+            { tenantId: activeTenant, method: "tools/execute", toolName: "analyze_jev_semantic_ast", status: "success", costCents: cost }
+          );
+        }
+
+        if (toolName === "calculate_u_value_iso6946") {
+          const result = calculateUValueIso6946(toolArgs as UValueCalculationInput);
+          return track(
+            new Response(
+              JSON.stringify({ success: true, ...result }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json", ...billingHeaders, ...CORS_HEADERS },
+              }
+            ),
+            { tenantId: activeTenant, method: "tools/execute", toolName: "calculate_u_value_iso6946", status: "success", costCents: cost }
+          );
+        }
+
+        if (toolName === "evaluate_fraud_transaction") {
+          const amount = Number(toolArgs.amount) || 0;
+          const currency = String(toolArgs.currency || "EUR");
+          const userRiskScore = Number(toolArgs.userRiskScore) || 0;
+          const isHighRisk = amount > 5000 || userRiskScore > 0.8;
+          return track(
+            new Response(
+              JSON.stringify({
+                success: true,
+                decision: isHighRisk ? "MANUAL_REVIEW" : "APPROVE",
+                riskLevel: isHighRisk ? "HIGH" : "LOW",
+                amount,
+                currency,
+                userRiskScore,
+                timestamp: new Date().toISOString(),
+              }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json", ...billingHeaders, ...CORS_HEADERS },
+              }
+            ),
+            { tenantId: activeTenant, method: "tools/execute", toolName: "evaluate_fraud_transaction", status: "success", costCents: cost }
+          );
+        }
+
+        return track(
+          new Response(JSON.stringify({ error: "Unsupported tool" }), {
+            status: 400,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          }),
+          { tenantId: activeTenant, method: "tools/execute", status: "client_error" }
+        );
+      } catch (err: any) {
+        return track(
+          new Response(
+            JSON.stringify({ error: err.message || String(err) }),
+            { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+          ),
+          { tenantId: activeTenant, method: "tools/execute", status: "client_error" }
+        );
+      }
+    }
+
     // SSE plūsmas ceļš (/sse un /mcp/sse)
     if ((url.pathname === "/sse" || url.pathname === "/mcp/sse") && request.method === "GET") {
       return track(

@@ -47,6 +47,7 @@
     "key:list": "tsx scripts/manage-keys.ts --action list",
     "key:revoke": "tsx scripts/manage-keys.ts --action revoke",
     "key:topup": "tsx scripts/manage-keys.ts --action topup",
+    "check": "tsx scripts/check-file.ts",
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",

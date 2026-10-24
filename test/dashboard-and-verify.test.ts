@@ -347,6 +347,31 @@ async function run() {
     }
   });
 
+  await testStep("POST /tools/execute tiešā REST izpilde rīkam ast_check", async () => {
+    const req = new Request("https://mcpx.harrykrauze.com/tools/execute", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer mcpx_live_dashboard_key_01",
+      },
+      body: JSON.stringify({
+        tool: "ast_check",
+        parameters: {
+          code: "console.log('clean code');",
+          filename: "test.ts",
+        },
+      }),
+    });
+    const res = await workerDefault.fetch(req, env, ctx);
+    if (res.status !== 200) throw new Error(`Gaidīts 200, saņemts ${res.status}`);
+    const data = (await res.json()) as any;
+    if (data.success !== true || data.valid !== true || data.verdict !== "SAFE") {
+      throw new Error(`Negaidīts rezultāts no /tools/execute: ${JSON.stringify(data)}`);
+    }
+    const balanceHdr = res.headers.get("X-MCPX-Balance-Cents");
+    if (!balanceHdr) throw new Error("Trūkst X-MCPX-Balance-Cents galvenes");
+  });
+
   console.log(`\n================================================================`);
   console.log(`Rezultāts: ${pass} sekmīgi, ${fail} neveiksmīgi`);
   console.log(`================================================================`);

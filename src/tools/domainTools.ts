@@ -252,6 +252,10 @@ export function analyzeJevSemanticAst(input: JevAstInput): JevAstResult {
 
 export const TOOL_ALIASES: Record<string, string> = {
   inspect_ast: "analyze_jev_semantic_ast",
+  ast_check: "analyze_jev_semantic_ast",
+  u_value_calc: "calculate_u_value_iso6946",
+  generate_mcp: "generate_mcp_server",
+  evaluate_fraud: "evaluate_fraud_transaction",
 };
 
 export function resolveCanonicalToolName(name: string | undefined | null): string {
