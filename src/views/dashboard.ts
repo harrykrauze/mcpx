@@ -321,10 +321,18 @@ export function renderDashboardHtml(health: HealthStatus): string {
         document.getElementById('res-balance').innerText = '$' + (data.balanceCents / 100).toFixed(2) + ' (' + data.balanceCents.toLocaleString() + ' credits)';
         document.getElementById('res-spent').innerText = '$' + (data.totalSpentCents / 100).toFixed(2) + ' (' + data.totalSpentCents.toLocaleString() + ' credits)';
         
-        const baseCheckout = 'https://www.creem.io/payment/prod_mcpx_topup';
-        document.getElementById('topup-10').href = baseCheckout + '?amount=1000&currency=USD&custom_fields[key_id]=' + encodeURIComponent(data.keyId);
-        document.getElementById('topup-25').href = baseCheckout + '?amount=2500&currency=USD&custom_fields[key_id]=' + encodeURIComponent(data.keyId);
-        document.getElementById('topup-50').href = baseCheckout + '?amount=5000&currency=USD&custom_fields[key_id]=' + encodeURIComponent(data.keyId);
+        const buildCheckoutUrl = (base) => {
+          const u = new URL(base);
+          u.searchParams.set("custom_field_key_id", key);
+          u.searchParams.set("key_id", key);
+          u.searchParams.set("return_url", "https://mcpx.harrykrauze.com/?payment=success");
+          u.searchParams.set("cancel_url", "https://mcpx.harrykrauze.com/?payment=cancelled");
+          return u.toString() + '&currency=USD';
+        };
+
+        document.getElementById('topup-10').href = buildCheckoutUrl('https://www.creem.io/payment/prod_6ByC0UlwmUHrR0IBSL1j66');
+        document.getElementById('topup-25').href = buildCheckoutUrl('https://www.creem.io/payment/prod_39gjR08cFRZlFbmUe660Sr');
+        document.getElementById('topup-50').href = buildCheckoutUrl('https://www.creem.io/payment/prod_4ygL3mb9sT5U6OptAtfJUp');
 
         resBox.style.display = 'block';
       } catch (err) {
