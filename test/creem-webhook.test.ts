@@ -1,15 +1,15 @@
 /**
  * test/creem-webhook.test.ts
  * 
- * AHP GATE 3 & GATE 6 Deterministiskā Creem.io Webhook Vārtejas Testu Kopa:
- * 1. Nederīga vai trūkstoša HMAC SHA-256 paraksta noraidīšana ar HTTP 401 Unauthorized.
- * 2. Viltota / modificēta satura noraidīšana ar HTTP 401 Unauthorized.
- * 3. Derīga 'checkout.completed' paziņojuma apstrāde un bilances atomāra papildināšana eirocentos.
- * 4. Idempotences garantija pie dubultiem pieprasījumiem ar vienu un to pašu payload.id (atkārtots debets netiek veikts).
- * 5. Lietotāja identificēšana pēc customer.email, ja keyId nav norādīts custom_fields.
- * 6. Kļūdu apstrāde: nevesels vai negatīvs 'amount' -> HTTP 400 Bad Request.
- * 7. Citu notikumu ('invoice.paid') ignorēšana ar HTTP 200 bez bilances izmaiņām.
- * 8. Pilns maršrutēšanas tests caur workerDefault.fetch (POST /webhooks/creem).
+ * AHP GATE 3 & GATE 6 Deterministic Creem.io Webhook Gateway Test Suite:
+ * 1. Invalid or missing HMAC SHA-256 signature rejected with HTTP 401 Unauthorized.
+ * 2. Tampered or modified request body rejected with HTTP 401 Unauthorized.
+ * 3. Valid 'checkout.completed' webhook processing and atomic balance top-up in integer cents.
+ * 4. Idempotency guarantee on duplicate requests with identical payload.id.
+ * 5. Key lookup via customer.email when keyId is absent in custom_fields.
+ * 6. Error handling: non-integer or negative amounts rejected with HTTP 400 Bad Request.
+ * 7. Full routing test through workerDefault.fetch (POST /webhooks/creem).
+ * 8. USD currency processing and format ($10.00 / 1000 credits).
  */
 
 import workerDefault from "../src/index";
@@ -94,7 +94,7 @@ function it(id: string, name: string, fn: () => Promise<string | void>) {
   steps.push({ id, name, run: fn });
 }
 
-// Konfigurācija testiem
+// Test configuration
 const TEST_WEBHOOK_SECRET = "creem_whsec_determinism_test_2026_strict";
 const TEST_API_KEY = "mcpx_live_creem_test_key_001";
 const TEST_KEY_ID = "key_creem_test_01";
@@ -125,8 +125,8 @@ function createMockEnv(kv: InMemoryKV): Env {
   };
 }
 
-// 1. Tests: Trūkstošs vai nederīgs paraksts
-it("C.1", "Nederīga vai trūkstoša HMAC paraksta noraidīšana (HTTP 401)", async () => {
+// 1. Test: Missing or invalid signature
+it("C.1", "Rejection of invalid or missing HMAC signature (HTTP 401)", async () => {
   const kv = new InMemoryKV();
   const env = createMockEnv(kv);
   const ctx = createMockCtx();
@@ -147,7 +147,7 @@ it("C.1", "Nederīga vai trūkstoša HMAC paraksta noraidīšana (HTTP 401)", as
 
   const rawBody = JSON.stringify(payload);
 
-  // A: Bez galvenes
+  // A: Without header
   const reqNoHeader = new Request("https://mcpx.harrykrauze.com/webhooks/creem", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -155,10 +155,10 @@ it("C.1", "Nederīga vai trūkstoša HMAC paraksta noraidīšana (HTTP 401)", as
   });
   const resNoHeader = await handleCreemWebhook(reqNoHeader, env, ctx);
   if (resNoHeader.status !== 401) {
-    throw new Error(`Gaidīts 401 bez galvenes, saņemts ${resNoHeader.status}`);
+    throw new Error(`Expected 401 without header, received ${resNoHeader.status}`);
   }
 
-  // B: Ar nederīgu parakstu
+  // B: With invalid signature
   const reqBadSig = new Request("https://mcpx.harrykrauze.com/webhooks/creem", {
     method: "POST",
     headers: {
@@ -169,14 +169,14 @@ it("C.1", "Nederīga vai trūkstoša HMAC paraksta noraidīšana (HTTP 401)", as
   });
   const resBadSig = await handleCreemWebhook(reqBadSig, env, ctx);
   if (resBadSig.status !== 401) {
-    throw new Error(`Gaidīts 401 ar nepareizu parakstu, saņemts ${resBadSig.status}`);
+    throw new Error(`Expected 401 with invalid signature, received ${resBadSig.status}`);
   }
 
-  return "HTTP 401 noraidīts gan bez paraksta, gan ar falsificētu parakstu";
+  return "HTTP 401 rejected both without signature and with falsified signature";
 });
 
-// 2. Tests: Saturs modificēts pēc parakstīšanas
-it("C.2", "Tampered/modificēta raw body noraidīšana (HTTP 401)", async () => {
+// 2. Test: Content tampered after signing
+it("C.2", "Rejection of tampered / modified raw body (HTTP 401)", async () => {
   const kv = new InMemoryKV();
   const env = createMockEnv(kv);
   const ctx = createMockCtx();
@@ -196,7 +196,7 @@ it("C.2", "Tampered/modificēta raw body noraidīšana (HTTP 401)", async () => 
 
   const validSig = await generateCreemSignature(originalBody, TEST_WEBHOOK_SECRET);
 
-  // Modificēts saturs (uzbrucējs palielina summu no 100 uz 100000)
+  // Tampered payload (attacker modifies amount from 100 to 100000)
   const tamperedBody = originalBody.replace(`"amount":100`, `"amount":100000`);
 
   const reqTampered = new Request("https://mcpx.harrykrauze.com/webhooks/creem", {
@@ -210,19 +210,19 @@ it("C.2", "Tampered/modificēta raw body noraidīšana (HTTP 401)", async () => 
 
   const res = await handleCreemWebhook(reqTampered, env, ctx);
   if (res.status !== 401) {
-    throw new Error(`Gaidīts 401 modificētam saturam, saņemts ${res.status}`);
+    throw new Error(`Expected 401 for tampered body, received ${res.status}`);
   }
 
-  return "Web Crypto HMAC verifikācija veiksmīgi novērsa datu falsifikāciju";
+  return "Web Crypto HMAC verification successfully prevented payload tampering";
 });
 
-// 3. Tests: Derīga apstrāde un bilances atomāra papildināšana eirocentos
-it("C.3", "Derīga 'checkout.completed' apstrāde un bilances papildināšana (HTTP 200)", async () => {
+// 3. Test: Valid processing and atomic balance top-up in integer cents
+it("C.3", "Valid 'checkout.completed' processing and balance top-up (HTTP 200)", async () => {
   const kv = new InMemoryKV();
   const env = createMockEnv(kv);
   const ctx = createMockCtx();
 
-  // Sagatavojam sākotnējo API atslēgas ierakstu KV krātuvē ar bilanci 50 centi
+  // Prepare initial API key record in KV with 50 cents balance
   const initialRecord: ApiKeyRecord = {
     keyId: TEST_KEY_ID,
     userId: "user_alpha",
@@ -251,7 +251,7 @@ it("C.3", "Derīga 'checkout.completed' apstrāde un bilances papildināšana (H
       id: "creem_ord_777",
       order_id: "order_topup_10eur",
       customer: { id: "cust_123", email: TEST_EMAIL },
-      amount: 1000, // 10 EUR = 1000 eirocenti
+      amount: 1000, // 10 EUR = 1000 cents
       currency: "EUR",
       custom_fields: { key_id: TEST_KEY_ID },
     },
@@ -272,41 +272,41 @@ it("C.3", "Derīga 'checkout.completed' apstrāde un bilances papildināšana (H
   const res = await handleCreemWebhook(req, env, ctx);
   if (res.status !== 200) {
     const errText = await res.text();
-    throw new Error(`Gaidīts 200 OK, saņemts ${res.status}: ${errText}`);
+    throw new Error(`Expected 200 OK, received ${res.status}: ${errText}`);
   }
 
   const data = (await res.json()) as CreemWebhookResponse;
   if (!data.success || data.addedCents !== 1000 || data.newBalanceCents !== 1050) {
-    throw new Error(`Nepareiza atbilde: ${JSON.stringify(data)}`);
+    throw new Error(`Invalid response: ${JSON.stringify(data)}`);
   }
 
-  // Pārbaudām KV krātuves faktisko stāvokli
+  // Verify KV actual state
   const updatedRaw = await kv.get(`key:${TEST_API_KEY}`, "text");
   const updatedRecord = JSON.parse(updatedRaw!) as ApiKeyRecord;
   if (updatedRecord.billing?.balanceCents !== 1050) {
-    throw new Error(`Bilance KV nav 1050! Fakti: ${updatedRecord.billing?.balanceCents}`);
+    throw new Error(`Balance in KV is not 1050! Actual: ${updatedRecord.billing?.balanceCents}`);
   }
 
-  // Pārbaudām idempotences atslēgu KV
+  // Verify idempotency key in KV
   const idempRaw = await kv.get(`webhook:processed:${payload.id}`, "text");
   if (!idempRaw) {
-    throw new Error(`Idempotences atslēga 'webhook:processed:${payload.id}' netika saglabāta KV!`);
+    throw new Error(`Idempotency key 'webhook:processed:${payload.id}' was not saved in KV!`);
   }
 
-  // Pārbaudām Analytics Engine telemetrijas ierakstu
+  // Verify Analytics Engine telemetry data point
   const topupPoint = recordedAnalyticsPoints.find((p) => p.blobs?.[0] === "creem.topup");
   if (!topupPoint) {
-    throw new Error("Analytics Engine datu punkts ar 'creem.topup' netika ierakstīts!");
+    throw new Error("Analytics Engine data point with 'creem.topup' was not recorded!");
   }
   if (topupPoint.doubles?.[0] !== 1000 || topupPoint.doubles?.[2] !== 1050) {
-    throw new Error(`Nepareizi Analytics Engine skaitliskie dati: ${JSON.stringify(topupPoint.doubles)}`);
+    throw new Error(`Invalid Analytics Engine numeric data: ${JSON.stringify(topupPoint.doubles)}`);
   }
 
-  return `Bilance papildināta par €10.00 (1000 c) -> Jaunā bilance: €10.50 (1050 c) (Analytics verificēts)`;
+  return `Balance topped up by €10.00 (1000 c) -> New balance: €10.50 (1050 c) (Analytics verified)`;
 });
 
-// 4. Tests: Idempotence pie dubultiem pieprasījumiem
-it("C.4", "Idempotences garantija pie dubultiem izsaukumiem ar vienu payload.id", async () => {
+// 4. Test: Idempotency on duplicate requests
+it("C.4", "Idempotency guarantee on duplicate calls with identical payload.id", async () => {
   const kv = new InMemoryKV();
   const env = createMockEnv(kv);
   const ctx = createMockCtx();
@@ -347,48 +347,48 @@ it("C.4", "Idempotences garantija pie dubultiem izsaukumiem ar vienu payload.id"
   const rawBody = JSON.stringify(payload);
   const sig = await generateCreemSignature(rawBody, TEST_WEBHOOK_SECRET);
 
-  // Pirmais izsaukums
+  // First call
   const req1 = new Request("https://mcpx.harrykrauze.com/webhooks/creem", {
     method: "POST",
     headers: { "Content-Type": "application/json", "creem-signature": sig },
     body: rawBody,
   });
   const res1 = await handleCreemWebhook(req1, env, ctx);
-  if (res1.status !== 200) throw new Error(`Pirmais izsaukums neizdevās: ${res1.status}`);
+  if (res1.status !== 200) throw new Error(`First call failed: ${res1.status}`);
 
-  // Otrais identisks izsaukums (replay / webhook retry)
+  // Second identical call (replay / webhook retry)
   const req2 = new Request("https://mcpx.harrykrauze.com/webhooks/creem", {
     method: "POST",
     headers: { "Content-Type": "application/json", "creem-signature": sig },
     body: rawBody,
   });
   const res2 = await handleCreemWebhook(req2, env, ctx);
-  if (res2.status !== 200) throw new Error(`Otrais izsaukums neizdevās: ${res2.status}`);
+  if (res2.status !== 200) throw new Error(`Second call failed: ${res2.status}`);
 
   const data2 = (await res2.json()) as CreemWebhookResponse;
   if (!data2.idempotentDuplicate) {
-    throw new Error(`Gaidīts idempotentDuplicate: true otrajā izsaukumā: ${JSON.stringify(data2)}`);
+    throw new Error(`Expected idempotentDuplicate: true on second call: ${JSON.stringify(data2)}`);
   }
 
-  // Pārliecināmies, ka bilance tika palielināta TIKAI VIENU REIZI (100 + 500 = 600, nevis 1100)
+  // Ensure balance increased only once (100 + 500 = 600, not 1100)
   const finalRaw = await kv.get(`key:${TEST_API_KEY}`, "text");
   const finalRecord = JSON.parse(finalRaw!) as ApiKeyRecord;
   if (finalRecord.billing?.balanceCents !== 600) {
-    throw new Error(`Idempotences pārkāpums! Bilance ir ${finalRecord.billing?.balanceCents}, gaidīta 600`);
+    throw new Error(`Idempotency violation! Balance is ${finalRecord.billing?.balanceCents}, expected 600`);
   }
 
-  return `Idempotence apstiprināta: otrais pieprasījums atgrieza 200 OK (idempotentDuplicate: true), bilance = 600 c`;
+  return `Idempotency confirmed: second request returned 200 OK (idempotentDuplicate: true), balance = 600 c`;
 });
 
-// 5. Tests: Lookup pēc customer.email (kad keyId nav nodots)
-it("C.5", "Atslēgas lookup pēc customer.email, kad keyId nav custom_fields", async () => {
+// 5. Test: Lookup by customer.email (when keyId is omitted)
+it("C.5", "Key lookup via customer.email when keyId is absent in custom_fields", async () => {
   const kv = new InMemoryKV();
   const env = createMockEnv(kv);
   const ctx = createMockCtx();
 
   const initialRecord: ApiKeyRecord = {
     keyId: "key_email_lookup_01",
-    userId: TEST_EMAIL, // Lietotāja identifikators sakrīt ar e-pastu
+    userId: TEST_EMAIL, // User ID matches email
     tenantId: "tenant_from_email",
     plan: "pro",
     status: "active",
@@ -429,20 +429,20 @@ it("C.5", "Atslēgas lookup pēc customer.email, kad keyId nav custom_fields", a
   const res = await handleCreemWebhook(req, env, ctx);
   if (res.status !== 200) {
     const errText = await res.text();
-    throw new Error(`Email lookup neizdevās (HTTP ${res.status}): ${errText}`);
+    throw new Error(`Email lookup failed (HTTP ${res.status}): ${errText}`);
   }
 
   const updatedRaw = await kv.get("key:mcpx_live_email_user_key", "text");
   const updated = JSON.parse(updatedRaw!) as ApiKeyRecord;
   if (updated.billing?.balanceCents !== 270) {
-    throw new Error(`Gaidīta bilance 270 (20 + 250), bet ir ${updated.billing?.balanceCents}`);
+    throw new Error(`Expected balance 270 (20 + 250), received ${updated.billing?.balanceCents}`);
   }
 
-  return `Sekmīgs lookup pēc e-pasta: bilance palielināta no 20 c uz 270 c`;
+  return `Successful lookup by email: balance increased from 20 c to 270 c`;
 });
 
-// 6. Tests: Nevesela vai negatīva summa (eirocentu standarts)
-it("C.6", "Neveselas vai negatīvas summas noraidīšana (HTTP 400)", async () => {
+// 6. Test: Non-integer or negative amount
+it("C.6", "Rejection of non-integer or negative amounts (HTTP 400)", async () => {
   const kv = new InMemoryKV();
   const env = createMockEnv(kv);
   const ctx = createMockCtx();
@@ -474,15 +474,15 @@ it("C.6", "Neveselas vai negatīvas summas noraidīšana (HTTP 400)", async () =
 
     const res = await handleCreemWebhook(req, env, ctx);
     if (res.status !== 400) {
-      throw new Error(`Summa ${amt} netika noraidīta ar 400! Statuss: ${res.status}`);
+      throw new Error(`Amount ${amt} was not rejected with 400! Status: ${res.status}`);
     }
   }
 
-  return `Visi nederīgie summu šabloni (-100, 0, 10.5, 3.1415) noraidīti ar HTTP 400`;
+  return `All invalid amount patterns (-100, 0, 10.5, 3.1415) rejected with HTTP 400`;
 });
 
-// 6b. Tests: Neatbalstītas valūtas noraidīšana ar HTTP 400
-it("C.6b", "Neatbalstītas valūtas ('GBP', 'JPY') noraidīšana ar HTTP 400", async () => {
+// 6b. Test: Rejection of unsupported currency with HTTP 400
+it("C.6b", "Rejection of unsupported currencies ('GBP', 'JPY') with HTTP 400", async () => {
   const kv = new InMemoryKV();
   const env = createMockEnv(kv);
   const ctx = createMockCtx();
@@ -512,19 +512,19 @@ it("C.6b", "Neatbalstītas valūtas ('GBP', 'JPY') noraidīšana ar HTTP 400", a
 
   const res = await handleCreemWebhook(req, env, ctx);
   if (res.status !== 400) {
-    throw new Error(`Neatbalstīta valūta 'GBP' netika noraidīta ar 400! Statuss: ${res.status}`);
+    throw new Error(`Unsupported currency 'GBP' was not rejected with 400! Status: ${res.status}`);
   }
 
   const errJson = (await res.json()) as any;
   if (!errJson.error?.includes("Unsupported currency")) {
-    throw new Error(`Gaidīts paziņojums par neatbalstītu valūtu, saņemts: ${JSON.stringify(errJson)}`);
+    throw new Error(`Expected unsupported currency message, received: ${JSON.stringify(errJson)}`);
   }
 
-  return `Neatbalstīta valūta 'GBP' noraidīta ar HTTP 400 Bad Request`;
+  return `Unsupported currency 'GBP' rejected with HTTP 400 Bad Request`;
 });
 
-// 7. Tests: workerDefault.fetch pilna integrācija (POST /webhooks/creem)
-it("C.7", "Pilns maršrutēšanas tests caur workerDefault.fetch", async () => {
+// 7. Test: workerDefault.fetch full routing integration (POST /webhooks/creem)
+it("C.7", "Full routing test via workerDefault.fetch", async () => {
   const kv = new InMemoryKV();
   const env = createMockEnv(kv);
   const ctx = createMockCtx();
@@ -569,7 +569,7 @@ it("C.7", "Pilns maršrutēšanas tests caur workerDefault.fetch", async () => {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-creem-signature": sig, // Testējam arī alternatīvo x-creem-signature galveni
+      "x-creem-signature": sig, // Test alternative header as well
     },
     body: rawBody,
   });
@@ -577,19 +577,19 @@ it("C.7", "Pilns maršrutēšanas tests caur workerDefault.fetch", async () => {
   const res = await workerDefault.fetch(req, env, ctx);
   if (res.status !== 200) {
     const errText = await res.text();
-    throw new Error(`workerDefault.fetch neizdevās (HTTP ${res.status}): ${errText}`);
+    throw new Error(`workerDefault.fetch failed (HTTP ${res.status}): ${errText}`);
   }
 
   const resData = (await res.json()) as CreemWebhookResponse;
   if (resData.newBalanceCents !== 310) {
-    throw new Error(`Gaidīta bilance 310, saņemts ${resData.newBalanceCents}`);
+    throw new Error(`Expected balance 310, received ${resData.newBalanceCents}`);
   }
 
-  return `Router maršruts POST /webhooks/creem veiksmīgi apstrādāts caur workerDefault.fetch`;
+  return `Router path POST /webhooks/creem successfully processed via workerDefault.fetch`;
 });
 
-// 8. Tests: USD valūtas apstrāde un formāts ($10.00 / 1000 credits)
-it("C.8", "USD valūtas topup apstrāde ar '$' simbolu atbildē", async () => {
+// 8. Test: USD currency top-up processing and format ($10.00 / 1000 credits)
+it("C.8", "USD currency top-up processing with '$' symbol in response", async () => {
   const kv = new InMemoryKV();
   const env = createMockEnv(kv);
   const ctx = createMockCtx();
@@ -642,24 +642,24 @@ it("C.8", "USD valūtas topup apstrāde ar '$' simbolu atbildē", async () => {
   const res = await handleCreemWebhook(req, env, ctx);
   if (res.status !== 200) {
     const errText = await res.text();
-    throw new Error(`handleCreemWebhook neizdevās (HTTP ${res.status}): ${errText}`);
+    throw new Error(`handleCreemWebhook failed (HTTP ${res.status}): ${errText}`);
   }
 
   const resData = (await res.json()) as CreemWebhookResponse;
   if (resData.newBalanceCents !== 1200) {
-    throw new Error(`Gaidīta bilance 1200, saņemts ${resData.newBalanceCents}`);
+    throw new Error(`Expected balance 1200, received ${resData.newBalanceCents}`);
   }
   if (!resData.message.includes("$10.00")) {
-    throw new Error(`Atbildes ziņojumā nav '$10.00': ${resData.message}`);
+    throw new Error(`Response message does not contain '$10.00': ${resData.message}`);
   }
 
-  return `USD topup $10.00 (1000 c) sekmīgi apstrādāts: ${resData.message}`;
+  return `USD top-up $10.00 (1000 c) successfully processed: ${resData.message}`;
 });
 
 async function run() {
   console.log(`================================================================`);
-  console.log(`  AHP GATE 3 / GATE 6: CREEM.IO WEBHOOK VĀRTEJAS VERIFIKĀCIJA    `);
-  console.log(`  Laika zīmogs: ${new Date().toISOString()}`);
+  console.log(`  AHP GATE 3 / GATE 6: CREEM.IO WEBHOOK GATEWAY VERIFICATION    `);
+  console.log(`  Timestamp: ${new Date().toISOString()}`);
   console.log(`================================================================\n`);
 
   for (const step of steps) {
@@ -673,23 +673,23 @@ async function run() {
       passCount++;
     } catch (err: any) {
       console.log("FAIL");
-      console.error(`       Kļūda: ${err.message || String(err)}`);
+      console.error(`       Error: ${err.message || String(err)}`);
       failCount++;
     }
   }
 
   console.log(`\n================================================================`);
-  console.log(`                      TESTU KOPSAVILKUMS                        `);
+  console.log(`                      TEST SUMMARY                              `);
   console.log(`================================================================`);
-  console.log(`Kopā soļi:    ${steps.length}`);
-  console.log(`Veiksmīgi:    ${passCount}`);
-  console.log(`Neveiksmīgi:  ${failCount}`);
+  console.log(`Total steps:  ${steps.length}`);
+  console.log(`Passed:       ${passCount}`);
+  console.log(`Failed:       ${failCount}`);
 
   if (failCount > 0) {
-    console.error(`\n[VĀRTI SLĒGTI] ${failCount} tests(-i) izgāzās!`);
+    console.error(`\n[GATE CLOSED] ${failCount} test(s) failed!`);
     process.exit(1);
   } else {
-    console.log(`\n[VĀRTI ATVĒRTI] Visi Creem.io Webhook vārtejas testi izturēti ar 100% PASS!`);
+    console.log(`\n[GATE OPEN] All Creem.io Webhook gateway tests passed with 100% PASS!`);
   }
 }
 

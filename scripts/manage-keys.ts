@@ -1,9 +1,9 @@
 /**
  * scripts/manage-keys.ts
  * 
- * Administratora CLI rīks API atslēgu inventarizācijai, tūlītējai atsaukšanai un bilances papildināšanai.
+ * Administrator CLI tool for API key inventory, revocation, and balance top-up.
  * 
- * Lietošana:
+ * Usage:
  *   npm run key:list
  *   npm run key:list -- --status active
  *   npm run key:revoke -- --key "key_6db5d05407f6"
@@ -77,7 +77,7 @@ async function listKeys(args: CliArgs) {
     endpoint += `?status=${encodeURIComponent(args.status)}`;
   }
 
-  console.log(`Izgūstam reģistrēto atslēgu sarakstu no ${endpoint}...`);
+  console.log(`Fetching registered keys list from ${endpoint}...`);
 
   const res = await fetch(endpoint, {
     method: "GET",
@@ -89,15 +89,15 @@ async function listKeys(args: CliArgs) {
 
   if (!res.ok) {
     const errText = await res.text();
-    console.error(`Kļūda izgūstot atslēgas (HTTP ${res.status}): ${errText}`);
+    console.error(`Error fetching keys (HTTP ${res.status}): ${errText}`);
     process.exit(1);
   }
 
   const data = (await res.json()) as any;
-  console.log(`\nKopā reģistrētas atslēgas: ${data.total}\n`);
+  console.log(`\nTotal registered keys: ${data.total}\n`);
 
   if (!data.keys || data.keys.length === 0) {
-    console.log("Neviena atslēga netika atrasta.");
+    console.log("No keys found.");
     return;
   }
 
@@ -113,9 +113,9 @@ async function listKeys(args: CliArgs) {
     " | " +
     "MODE".padEnd(10) +
     " | " +
-    "BALANCE (EUR)".padEnd(14) +
+    "BALANCE (USD)".padEnd(14) +
     " | " +
-    "SPENT (EUR)".padEnd(12) +
+    "SPENT (USD)".padEnd(12) +
     " | " +
     "RATE".padEnd(6) +
     " | " +
@@ -128,11 +128,11 @@ async function listKeys(args: CliArgs) {
     const statusLabel = k.status === "active" ? "\x1b[32mactive\x1b[0m" : "\x1b[31mrevoked\x1b[0m";
     const mode = k.billing?.mode || "prepaid";
     const balance = typeof k.billing?.balanceCents === "number"
-      ? `€${(k.billing.balanceCents / 100).toFixed(2)}`
+      ? `$${(k.billing.balanceCents / 100).toFixed(2)}`
       : "N/A";
     const spent = typeof k.billing?.totalSpentCents === "number"
-      ? `€${(k.billing.totalSpentCents / 100).toFixed(2)}`
-      : "€0.00";
+      ? `$${(k.billing.totalSpentCents / 100).toFixed(2)}`
+      : "$0.00";
 
     console.log(
       "| " +
@@ -161,12 +161,12 @@ async function listKeys(args: CliArgs) {
 
 async function revokeKey(args: CliArgs) {
   if (!args.target) {
-    console.error("KĻŪDA: Atslēgas atsaukšanai jānorāda --key <keyId vai apiKey>.");
+    console.error("ERROR: Must specify --key <keyId or apiKey> to revoke key.");
     process.exit(1);
   }
 
   const endpoint = `${args.url.replace(/\/+$/, "")}/keys/${encodeURIComponent(args.target)}`;
-  console.log(`Sūtām atsaukšanas pieprasījumu: DELETE ${endpoint}...`);
+  console.log(`Sending revocation request: DELETE ${endpoint}...`);
 
   const res = await fetch(endpoint, {
     method: "DELETE",
@@ -178,31 +178,31 @@ async function revokeKey(args: CliArgs) {
 
   if (!res.ok) {
     const errText = await res.text();
-    console.error(`Kļūda atsaucot atslēgu (HTTP ${res.status}): ${errText}`);
+    console.error(`Error revoking key (HTTP ${res.status}): ${errText}`);
     process.exit(1);
   }
 
   const data = (await res.json()) as any;
-  console.log("\n✅ ATSLĒGA VEIKSMĪGI ANULĒTA!\n");
+  console.log("\n✅ KEY SUCCESSFULLY REVOKED!\n");
   console.log(`  Key ID:     ${data.keyId}`);
-  console.log(`  Statuss:    ${data.status}`);
-  console.log(`  Anulēta:    ${data.revokedAt}`);
-  console.log(`  Paziņojums: ${data.message}\n`);
+  console.log(`  Status:     ${data.status}`);
+  console.log(`  Revoked At: ${data.revokedAt}`);
+  console.log(`  Message:    ${data.message}\n`);
 }
 
 async function topupKey(args: CliArgs) {
   if (!args.target) {
-    console.error("KĻŪDA: Bilances papildināšanai jānorāda --key <keyId, apiKey vai tenantId>.");
+    console.error("ERROR: Must specify --key <keyId, apiKey or tenantId> for balance top-up.");
     process.exit(1);
   }
 
   if (!args.amount || args.amount <= 0 || !Number.isInteger(args.amount)) {
-    console.error("KĻŪDA: Jānorāda pozitīvs centu daudzums ar --amount <centi> (piemēram, --amount 500 priekš €5.00).");
+    console.error("ERROR: Must specify a positive amount of cents via --amount <cents> (e.g., --amount 500 for $5.00).");
     process.exit(1);
   }
 
   const endpoint = `${args.url.replace(/\/+$/, "")}/keys/topup`;
-  console.log(`Sūtām bilances papildināšanas pieprasījumu uz ${endpoint}...`);
+  console.log(`Sending top-up request to ${endpoint}...`);
 
   const res = await fetch(endpoint, {
     method: "POST",
@@ -220,33 +220,33 @@ async function topupKey(args: CliArgs) {
 
   if (!res.ok) {
     const errText = await res.text();
-    console.error(`Kļūda papildinot bilanci (HTTP ${res.status}): ${errText}`);
+    console.error(`Error topping up balance (HTTP ${res.status}): ${errText}`);
     process.exit(1);
   }
 
   const data = (await res.json()) as any;
-  console.log("\n✅ BILANCE VEIKSMĪGI PAPILDINĀTA!\n");
+  console.log("\n✅ BALANCE SUCCESSFULLY TOPPED UP!\n");
   console.log(`  Key ID:          ${data.keyId}`);
-  console.log(`  Nomnieks:        ${data.tenantId}`);
-  console.log(`  Pievienots:      €${(data.addedCents / 100).toFixed(2)} (${data.addedCents} centi)`);
-  console.log(`  Jaunā bilance:   €${(data.billing?.balanceCents / 100).toFixed(2)} (${data.billing?.balanceCents} centi)`);
-  console.log(`  Kopā iztērēts:   €${(data.billing?.totalSpentCents / 100).toFixed(2)}`);
-  console.log(`  Režīms:          ${data.billing?.mode}`);
-  console.log(`  Pēdējā papild.:  ${data.billing?.lastTopupAt}\n`);
+  console.log(`  Tenant ID:       ${data.tenantId}`);
+  console.log(`  Added:           $${(data.addedCents / 100).toFixed(2)} (${data.addedCents} cents)`);
+  console.log(`  New Balance:     $${(data.billing?.balanceCents / 100).toFixed(2)} (${data.billing?.balanceCents} cents)`);
+  console.log(`  Total Spent:     $${(data.billing?.totalSpentCents / 100).toFixed(2)}`);
+  console.log(`  Mode:            ${data.billing?.mode}`);
+  console.log(`  Last Topup:      ${data.billing?.lastTopupAt}\n`);
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   console.log(`================================================================`);
-  console.log(`  MCPX API ATSLĒGU PĀRVALDĪBAS CLI (LIFECYCLE MANAGEMENT)       `);
-  console.log(`  Darbība: ${args.action.toUpperCase()}`);
-  console.log(`  Mērķa vārteja: ${args.url}`);
+  console.log(`  MCPX API KEY MANAGEMENT CLI (LIFECYCLE MANAGEMENT)           `);
+  console.log(`  Action: ${args.action.toUpperCase()}`);
+  console.log(`  Target Gateway: ${args.url}`);
   console.log(`================================================================\n`);
 
   if (!args.masterKey) {
-    console.error("KĻŪDA: Trūkst administratora noslēpuma.");
-    console.error("Lūdzu, iestatiet vides mainīgo MCPX_MASTER_KEY vai norādiet --masterKey.");
+    console.error("ERROR: Missing master administrator key.");
+    console.error("Please set the MCPX_MASTER_KEY environment variable or specify --masterKey.");
     process.exit(1);
   }
 
@@ -260,6 +260,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Kritiska kļūda izpildot CLI:", err);
+  console.error("Critical error executing CLI:", err);
   process.exit(1);
 });

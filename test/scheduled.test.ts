@@ -1,8 +1,8 @@
 /**
  * test/scheduled.test.ts
  *
- * Cloudflare Worker Cron Trigger (scheduled) vienībtests:
- * Pārbauda ikdienas audita kopsavilkuma ģenerēšanu un zemas bilances atslēgu identifikāciju.
+ * Cloudflare Worker Cron Trigger (scheduled) unit test:
+ * Verifies daily audit summary generation and low-balance key identification.
  */
 
 import workerDefault, { handleScheduled } from "../src/index";
@@ -79,8 +79,8 @@ function createMockCtx(): ExecutionContext {
 
 async function runScheduledTests() {
   console.log("================================================================");
-  console.log("      CRON TRIGGER (SCHEDULED AUDIT) VIENĪBTESTS               ");
-  console.log("      Laika zīmogs: " + new Date().toISOString());
+  console.log("      CRON TRIGGER (SCHEDULED AUDIT) UNIT TEST                  ");
+  console.log("      Timestamp: " + new Date().toISOString());
   console.log("================================================================\n");
 
   const kv = new MockKV();
@@ -93,8 +93,8 @@ async function runScheduledTests() {
   };
   const ctx = createMockCtx();
 
-  // Sagatavo testa atslēgas KV krātuvē
-  // 1. Aktīva atslēga ar pietiekamu bilanci (500 centi = $5.00)
+  // Prepare test keys in mock KV store
+  // 1. Active key with healthy balance (500 cents = $5.00)
   await kv.put(
     "key:mcpx_live_client_healthy_01",
     JSON.stringify({
@@ -115,7 +115,7 @@ async function runScheduledTests() {
     })
   );
 
-  // 2. Aktīva atslēga ar zemu bilanci (45 centi = $0.45, zem 100 centiem)
+  // 2. Active key with low balance (45 cents = $0.45, under 100 cents)
   await kv.put(
     "key:mcpx_live_client_low_02",
     JSON.stringify({
@@ -136,7 +136,7 @@ async function runScheduledTests() {
     })
   );
 
-  // 3. Aktīva atslēga ar kritiski 0 bilanci (0 centi)
+  // 3. Active key with zero balance (0 cents)
   await kv.put(
     "key:mcpx_live_client_zero_03",
     JSON.stringify({
@@ -157,7 +157,7 @@ async function runScheduledTests() {
     })
   );
 
-  // 4. Anulēta (revoked) atslēga - tai nevajadzētu parādīties pie aktīvajām
+  // 4. Revoked key - should not appear among active keys
   await kv.put(
     "key:mcpx_live_client_revoked_04",
     JSON.stringify({
@@ -201,61 +201,61 @@ async function runScheduledTests() {
     noRetry() {},
   };
 
-  await testStep("Izpilda workerDefault.scheduled un saņem atgriezto auditu", async () => {
+  await testStep("Executes workerDefault.scheduled and generates audit summary", async () => {
     if (!workerDefault.scheduled) {
-      throw new Error("workerDefault nesatur 'scheduled' apstrādātāju!");
+      throw new Error("workerDefault does not export a 'scheduled' handler!");
     }
     await workerDefault.scheduled(controller, env, ctx);
   });
 
-  await testStep("Pārbauda, ka stats:daily:2026-10-24 ir saglabāts KV krātuvē ar pareizo struktūru", async () => {
+  await testStep("Verifies that stats:daily:2026-10-24 is stored in KV with valid schema", async () => {
     const rawDaily = await kv.get("stats:daily:2026-10-24", "text");
     if (!rawDaily) {
-      throw new Error("KV nesatur ierakstu 'stats:daily:2026-10-24'");
+      throw new Error("KV does not contain entry 'stats:daily:2026-10-24'");
     }
     const daily = JSON.parse(rawDaily) as DailyAuditSummary;
     if (daily.status !== "HEALTHY") {
-      throw new Error(`Gaidīts statuss 'HEALTHY', saņemts: ${daily.status}`);
+      throw new Error(`Expected status 'HEALTHY', received: ${daily.status}`);
     }
     if (daily.date !== "2026-10-24") {
-      throw new Error(`Gaidīts datums '2026-10-24', saņemts: ${daily.date}`);
+      throw new Error(`Expected date '2026-10-24', received: ${daily.date}`);
     }
     if (daily.totalActiveKeys !== 3) {
-      throw new Error(`Gaidītas 3 aktīvas atslēgas, saņemtas: ${daily.totalActiveKeys}`);
+      throw new Error(`Expected 3 active keys, received: ${daily.totalActiveKeys}`);
     }
     if (daily.lowBalanceCount !== 2) {
-      throw new Error(`Gaidītas 2 zemas bilances atslēgas, saņemtas: ${daily.lowBalanceCount}`);
+      throw new Error(`Expected 2 low-balance keys, received: ${daily.lowBalanceCount}`);
     }
     const hasLow02 = daily.lowBalanceKeys.some((k) => k.keyId === "key_low_02" && k.balanceCents === 45);
     const hasZero03 = daily.lowBalanceKeys.some((k) => k.keyId === "key_zero_03" && k.balanceCents === 0);
     if (!hasLow02 || !hasZero03) {
-      throw new Error("lowBalanceKeys nesatur pareizās atslēgas: " + JSON.stringify(daily.lowBalanceKeys));
+      throw new Error("lowBalanceKeys does not contain expected keys: " + JSON.stringify(daily.lowBalanceKeys));
     }
-    // Pārbauda 30 dienu TTL opciju
+    // Verify 30-day expiration TTL
     const opts = kv.expirationOptions.get("stats:daily:2026-10-24");
     if (!opts || opts.expirationTtl !== 30 * 86400) {
-      throw new Error("Ierakstam trūkst 30 dienu expirationTtl (2592000s)");
+      throw new Error("Entry missing 30-day expirationTtl (2592000s)");
     }
   });
 
-  await testStep("Pārbauda, ka Analytics Engine reģistrēja telemetrijas punktu par Cron auditēšanu", async () => {
+  await testStep("Verifies that Analytics Engine recorded cron audit telemetry data point", async () => {
     if (analytics.dataPoints.length === 0) {
-      throw new Error("Analytics Engine nav saņēmis nevienu datu punktu!");
+      throw new Error("Analytics Engine received no data points!");
     }
     const point = analytics.dataPoints[0];
     if (point.blobs?.[0] !== "system.cron_health") {
-      throw new Error(`Gaidīts blob1 'system.cron_health', saņemts: ${point.blobs?.[0]}`);
+      throw new Error(`Expected blob1 'system.cron_health', received: ${point.blobs?.[0]}`);
     }
     if (point.doubles?.[0] !== 3) {
-      throw new Error(`Gaidīts double1 (aktīvās atslēgas: 3), saņemts: ${point.doubles?.[0]}`);
+      throw new Error(`Expected double1 (active keys: 3), received: ${point.doubles?.[0]}`);
     }
     if (point.doubles?.[1] !== 2) {
-      throw new Error(`Gaidīts double2 (zemās bilances: 2), saņemts: ${point.doubles?.[1]}`);
+      throw new Error(`Expected double2 (low balance keys: 2), received: ${point.doubles?.[1]}`);
     }
   });
 
   console.log(`\n================================================================`);
-  console.log(`Rezultāts: ${pass} sekmīgi, ${fail} neveiksmīgi`);
+  console.log(`Result: ${pass} passed, ${fail} failed`);
   console.log(`================================================================`);
 
   if (fail > 0) {
@@ -264,6 +264,6 @@ async function runScheduledTests() {
 }
 
 runScheduledTests().catch((err) => {
-  console.error("Testa kļūda:", err);
+  console.error("Test error:", err);
   process.exit(1);
 });

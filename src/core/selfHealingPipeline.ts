@@ -35,10 +35,10 @@ export async function runSelfHealingPipeline(params: {
   const history: PipelineExecutionRecord[] = [];
 
   for (let iteration = 1; iteration <= maxIterations; iteration++) {
-    // 1. Solis: Deterministiskā kompilācija un shēmas pārbaude (Tier 0 Gate)
+    // Step 1: Deterministic compilation and schema verification (Tier 0 Gate)
     const verification = await verifyMcpTool(currentCode);
 
-    // 2. Solis: Maršrutēšana un kļūdu klasifikācija
+    // Step 2: Routing and error diagnostics classification
     const routing = routeDiagnostics(verification, currentSchemaErrors);
 
     history.push({
@@ -48,7 +48,7 @@ export async function runSelfHealingPipeline(params: {
       diagnosticsCount: routing.trimmedDiagnostics.length
     });
 
-    // Ja kods ir tīrs – veiksmīgs noslēgums
+    // If code is clean – successful completion
     if (routing.tier === "CLEAN") {
       return {
         success: true,
@@ -58,7 +58,7 @@ export async function runSelfHealingPipeline(params: {
       };
     }
 
-    // 3. & 4. Solis: Labošana atbilstoši slānim
+    // Step 3 & 4: Repair according to designated tier
     try {
       if (params.repairerOverride) {
         currentCode = await params.repairerOverride(currentCode, routing);
@@ -74,17 +74,17 @@ export async function runSelfHealingPipeline(params: {
         totalIterations: iteration,
         history,
         errorReport: {
-          reason: `Kļūda labotāja izpildē (${repairError.message || repairError}). Pašārstēšanās apturēta.`,
+          reason: `Error during repair execution (${repairError.message || repairError}). Self-healing halted.`,
           finalDiagnostics: routing.trimmedDiagnostics
         }
       };
     }
 
-    // Pēc pirmā labojuma shēmas kļūdas tiek atkārtoti pārbaudītas ar tsc un kodu
+    // After first repair, schema errors are re-verified via tsc and updated code
     currentSchemaErrors = undefined;
   }
 
-  // Pēdējā gala pārbaude pēc maksimālo iterāciju sasniegšanas
+  // Final verification after reaching maximum iterations
   const finalVerification = await verifyMcpTool(currentCode);
   if (finalVerification.valid) {
     return {
@@ -95,14 +95,14 @@ export async function runSelfHealingPipeline(params: {
     };
   }
 
-  // 5. Solis: Circuit Breaker nostrāde (atteikums)
+  // Step 5: Circuit Breaker trip (graceful failure)
   return {
     success: false,
     code: currentCode,
     totalIterations: maxIterations,
     history,
     errorReport: {
-      reason: `Sasniegts maksimālais pašārstēšanās iterāciju limits (${maxIterations}). Kods joprojām satur neizlabotas tipu vai kompilācijas kļūdas.`,
+      reason: `Maximum self-healing iteration limit reached (${maxIterations}). Code still contains unresolved type or compiler errors.`,
       finalDiagnostics: finalVerification.diagnostics
     }
   };

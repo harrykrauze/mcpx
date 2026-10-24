@@ -1,8 +1,8 @@
 /**
  * scripts/test-sandbox-escape.ts
  * 
- * AHP GATE 3 (/test) — Sprint 2: Smilškastes Ielaušanās un Drošības Pārbaudes
- * 11 stingri uzbrukuma un pozitīvās kontroles testu vektori.
+ * AHP GATE 3 (/test) — Sprint 2: Sandbox Escape & Isolation Tests
+ * 11 attack and positive control test vectors.
  */
 
 import { CodeSandbox, SandboxResult } from "../src/core/codeSandbox.js";
@@ -46,12 +46,12 @@ async function runVector(
     if (pass) {
       console.log(`PASS (${duration}ms) [status: ${res.status}]`);
       if (res.errorDetails) {
-        console.log(`          Paziņojums: ${res.errorDetails}`);
+        console.log(`          Message: ${res.errorDetails}`);
       }
     } else {
-      console.log(`FAIL (${duration}ms) [gaidīts: ${expectedStatus}, saņemts: ${res.status}]`);
+      console.log(`FAIL (${duration}ms) [expected: ${expectedStatus}, received: ${res.status}]`);
       if (res.errorDetails) {
-        console.log(`          Kļūda: ${res.errorDetails}`);
+        console.log(`          Error: ${res.errorDetails}`);
       }
     }
 
@@ -66,7 +66,7 @@ async function runVector(
     });
   } catch (err: any) {
     const duration = Date.now() - start;
-    console.log(`FAIL (Izņēmums: ${err.message})`);
+    console.log(`FAIL (Exception: ${err.message})`);
     reports.push({
       id,
       name,
@@ -82,77 +82,77 @@ async function runVector(
 async function runAllTests() {
   console.log("======================================================================");
   console.log("  AHP GATE 3: SPRINT 2 SANDBOX ESCAPE & ISOLATION TEST SUITE");
-  console.log("  Dzinējs: node:worker_threads (V8 ResourceLimits: 64 MB Heap)");
-  console.log(`  Laiks: ${new Date().toISOString()}`);
+  console.log("  Engine: node:worker_threads (V8 ResourceLimits: 64 MB Heap)");
+  console.log(`  Timestamp: ${new Date().toISOString()}`);
   console.log("======================================================================\n");
 
-  // Vektors 1: Prototipu piesārņošana caur __proto__
+  // Vector 1: Prototype pollution via __proto__
   await runVector(
     1,
-    "Prototipu piesārņošanas bloķēšana (__proto__)",
+    "Blocking prototype pollution (__proto__)",
     `args.__proto__.polluted = true; return Object.prototype.polluted;`,
     {},
     "security_violation"
   );
 
-  // Vektors 2: Konstruktora izbēgšana caur constructor.constructor
+  // Vector 2: Constructor escape via constructor.constructor
   await runVector(
     2,
-    "Konstruktora izbēgšanas bloķēšana (constructor.constructor)",
+    "Blocking constructor escape (constructor.constructor)",
     `return ({}).constructor.constructor("return process")().env;`,
     {},
     "security_violation"
   );
 
-  // Vektors 3: Globālo objektu modifikācija (Object.defineProperty / setPrototypeOf)
+  // Vector 3: Global object modification (Object.defineProperty / setPrototypeOf)
   await runVector(
     3,
-    "Objektu modifikācijas bloķēšana (Object.defineProperty)",
+    "Blocking object modification (Object.defineProperty)",
     `Object.defineProperty(Object.prototype, "hacked", { value: 123 }); return true;`,
     {},
     "security_violation"
   );
 
-  // Vektors 4: Dinamiskā koda izpildes bloķēšana (eval)
+  // Vector 4: Dynamic code execution blocking (eval)
   await runVector(
     4,
-    "Dinamiskās eval() izpildes bloķēšana",
+    "Blocking dynamic eval() execution",
     `return eval("2 + 2");`,
     {},
     "security_violation"
   );
 
-  // Vektors 5: Dinamiskā funkcijas konstruktora bloķēšana (Function)
+  // Vector 5: Dynamic function constructor blocking (Function)
   await runVector(
     5,
-    "Dinamiskā Function() konstruktora bloķēšana",
+    "Blocking dynamic Function() constructor",
     `return Function("return 42")();`,
     {},
     "security_violation"
   );
 
-  // Vektors 6: Sistēmas procesa un vides piekļuves bloķēšana (process)
+  // Vector 6: System process and environment access blocking (process)
   await runVector(
     6,
-    "Sistēmas procesa (process.env / process.exit) bloķēšana",
+    "Blocking system process access (process.env / process.exit)",
     `return process.env.PATH || process.exit(1);`,
     {},
     "security_violation"
   );
 
-  // Vektors 7: Tīkla piekļuves un SSRF bloķēšana (fetch)
+  // Vector 7: Network access and SSRF blocking (fetch)
   await runVector(
     7,
-    "Tīkla un SSRF izsaukumu bloķēšana (fetch)",
+    "Blocking network and SSRF calls (fetch)",
     `return await fetch("https://169.254.169.254/latest/meta-data");`,
     {},
     "security_violation"
   );
 
-  // Vektors 8: Bezgalīgā cikla CPU bloķēšanas apturēšana (Timeout 300ms)
+  // Vector 8: Infinite loop CPU abort (Timeout 300ms)
   await runVector(
     8,
-    "Bezgalīgā cikla CPU apturēšana (while(true) -> timeout 300ms)",
+    "Infinite loop CPU termination (while(true) -> timeout 300ms)",
     `let x = 0; while (true) { x++; }`,
     {},
     "timeout",
@@ -160,10 +160,10 @@ async function runAllTests() {
     (res) => res.executionTimeMs >= 250
   );
 
-  // Vektors 9: Atmiņas limita (OOM) pārsniegšanas izolēšana (64 MB Heap)
+  // Vector 9: Memory limit (OOM) isolation (64 MB Heap)
   await runVector(
     9,
-    "Atmiņas limita (OOM) izolēšana (V8 maxOldGeneration: 64 MB)",
+    "Memory limit (OOM) isolation (V8 maxOldGeneration: 64 MB)",
     `
       const chunks = [];
       while (true) {
@@ -175,11 +175,11 @@ async function runAllTests() {
     3000
   );
 
-  // Vektors 10: Informācijas noplūdes novēršana (Sanitizēts kļūdas ziņojums)
+  // Vector 10: Information leak prevention (Sanitized error message)
   await runVector(
     10,
-    "Informācijas noplūdes novēršana (ceļu un steka sanitizācija)",
-    `throw new Error("Sistēmas kļūda pie C:\\\\Users\\\\Admin\\\\Documents\\\\secret\\\\keys.ts:45:12");`,
+    "Information leak prevention (path and stack sanitization)",
+    `throw new Error("System error at C:\\\\Users\\\\Admin\\\\Documents\\\\secret\\\\keys.ts:45:12");`,
     {},
     "runtime_error",
     2000,
@@ -191,10 +191,10 @@ async function runAllTests() {
     }
   );
 
-  // Vektors 11: Pozitīvā kontrole (Derīgas biznesa loģikas un datu apstrāde)
+  // Vector 11: Positive control (Valid business logic and data processing)
   await runVector(
     11,
-    "Pozitīvā kontrole (droša aprēķinu loģika un objekta atgriešana)",
+    "Positive control (safe computational logic and object return)",
     `
       const numbers = args.numbers || [];
       const sum = numbers.reduce((acc, curr) => acc + curr, 0);
@@ -202,7 +202,7 @@ async function runAllTests() {
         count: numbers.length,
         sum,
         average: numbers.length > 0 ? sum / numbers.length : 0,
-        greeting: "Labdien, " + (args.user || "Viesis") + "!"
+        greeting: "Hello, " + (args.user || "Guest") + "!"
       };
     `,
     { numbers: [10, 20, 30, 40], user: "Antigravity" },
@@ -214,16 +214,16 @@ async function runAllTests() {
         data &&
         data.sum === 100 &&
         data.average === 25 &&
-        data.greeting === "Labdien, Antigravity!"
+        data.greeting === "Hello, Antigravity!"
       );
     }
   );
 
   console.log("\n======================================================================");
-  console.log("  REZULTĀTU KOPSAVILKUMS:");
+  console.log("  RESULTS SUMMARY:");
   const passed = reports.filter((r) => r.pass).length;
   const failed = reports.filter((r) => !r.pass).length;
-  console.log(`  Kopā testu: ${reports.length} | Izturēti: ${passed} | Neveiksmīgi: ${failed}`);
+  console.log(`  Total tests: ${reports.length} | Passed: ${passed} | Failed: ${failed}`);
   console.log("======================================================================\n");
 
   if (failed > 0) {
@@ -232,6 +232,6 @@ async function runAllTests() {
 }
 
 runAllTests().catch((err) => {
-  console.error("Neatgriezeniska kļūda testa izpildē:", err);
+  console.error("Fatal error during test execution:", err);
   process.exit(1);
 });

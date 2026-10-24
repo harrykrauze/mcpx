@@ -22,8 +22,8 @@ export interface DynamicMcpToolDefinition {
     properties: Record<string, any>;
     required?: string[];
   };
-  tenantId?: string; // Ja norādīts, pieejams tikai konkrētajam tenantId (multitenancy izolācija)
-  sourceCode?: string; // Ģenerētā TypeScript koda virkne semantiskajai Jev pārbaudei
+  tenantId?: string; // If specified, accessible only to that tenantId (multitenancy isolation)
+  sourceCode?: string; // Generated TypeScript code for semantic Jev safety check
   handler: (args: Record<string, any>, principal: AuthenticatedPrincipal) => Promise<{
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
@@ -75,7 +75,7 @@ export class RemoteMcpSseGateway {
   }
 
   /**
-   * Reģistrē dinamiski ģenerētu un verificētu MCP rīku vārtejā
+   * Registers a dynamically generated and verified MCP tool in the gateway
    */
   public registerDynamicTool(tool: DynamicMcpToolDefinition): void {
     const validation = validateToolManifest({
@@ -86,16 +86,16 @@ export class RemoteMcpSseGateway {
 
     if (!validation.success) {
       throw new Error(
-        `Dinamiskā rīka reģistrācija atteikta (SchemaGuard): ${validation.errors?.join("; ")}`
+        `Dynamic tool registration rejected (SchemaGuard): ${validation.errors?.join("; ")}`
       );
     }
 
-    // TypeSafe Jev semantiskā koda pārbaude pirms reģistrācijas
+    // TypeSafe Jev semantic code check prior to registration
     if (tool.sourceCode) {
       const jevCheck = TypeSafeJevFilter.inspectCode(tool.sourceCode);
       if (!jevCheck.allowed) {
         throw new Error(
-          `Dinamiskā rīka reģistrācija atteikta (JevFilter): ${jevCheck.violations.map(v => v.message).join("; ")}`
+          `Dynamic tool registration rejected (JevFilter): ${jevCheck.violations.map(v => v.message).join("; ")}`
         );
       }
     }
@@ -104,7 +104,7 @@ export class RemoteMcpSseGateway {
   }
 
   /**
-   * Atgriež aktīvo sesiju skaitu un metadatus
+   * Returns active sessions list and metadata
    */
   public getActiveSessions() {
     return Array.from(this.sessions.values()).map(s => ({
@@ -118,7 +118,7 @@ export class RemoteMcpSseGateway {
   }
 
   /**
-   * Izveido izolētu MCP Server instanci konkrētajai SSE sesijai un tās nomniekam (tenant)
+   * Creates an isolated MCP Server instance for the specific SSE session and its tenant
    */
   private createSessionMcpServer(principal: AuthenticatedPrincipal): Server {
     const mcpServer = new Server(
@@ -151,11 +151,11 @@ export class RemoteMcpSseGateway {
       const toolName = request.params.name;
       const args = (request.params.arguments || {}) as Record<string, any>;
 
-      // 1. Iebūvētais pašārstējošais MCP serveru ģenerators
+      // 1. Built-in self-healing MCP server generator
       if (toolName === "generate_mcp_server") {
         if (!principal.scopes.includes("mcp:generate") && !principal.scopes.includes("mcp:admin")) {
           return {
-            content: [{ type: "text", text: "Forbidden: Trūkst 'mcp:generate' atļaujas." }],
+            content: [{ type: "text", text: "Forbidden: Missing 'mcp:generate' scope." }],
             isError: true
           };
         }
@@ -171,7 +171,7 @@ export class RemoteMcpSseGateway {
           transport: "sse"
         });
 
-        // Ja valoda ir TypeScript, izlaižam galveno failu caur Self-Healing Pipeline
+        // If target language is TypeScript, pass main entry file through Self-Healing Pipeline
         const mainTsFile = result.files.find(f => f.path === "index.ts");
         let healingSummary = "N/A";
         if (mainTsFile && language === "typescript") {
@@ -181,7 +181,7 @@ export class RemoteMcpSseGateway {
           });
           mainTsFile.content = healRes.code;
           healingSummary = healRes.success
-            ? `VERIFIED_CLEAN (iterācijas: ${healRes.totalIterations})`
+            ? `VERIFIED_CLEAN (iterations: ${healRes.totalIterations})`
             : `CIRCUIT_BREAKER_HALT (${healRes.errorReport?.reason})`;
         }
 
@@ -205,10 +205,10 @@ export class RemoteMcpSseGateway {
         };
       }
 
-      // 2. Dinamiski reģistrētie rīki ar Tenant izolāciju
+      // 2. Dynamically registered tools with tenant isolation
       const dynamicTool = this.dynamicTools.get(toolName);
       if (!dynamicTool) {
-        throw new McpError(ErrorCode.MethodNotFound, `Rīks nav atrasts: ${toolName}`);
+        throw new McpError(ErrorCode.MethodNotFound, `Tool not found: ${toolName}`);
       }
 
       if (dynamicTool.tenantId && dynamicTool.tenantId !== principal.tenantId) {
@@ -216,7 +216,7 @@ export class RemoteMcpSseGateway {
           content: [
             {
               type: "text",
-              text: `Access Denied: Rīks '${toolName}' pieder citam nomniekam (tenant).`
+              text: `Access Denied: Tool '${toolName}' belongs to another tenant.`
             }
           ],
           isError: true
@@ -225,12 +225,12 @@ export class RemoteMcpSseGateway {
 
       if (!principal.scopes.includes("mcp:tools") && !principal.scopes.includes("mcp:admin")) {
         return {
-          content: [{ type: "text", text: "Forbidden: Trūkst 'mcp:tools' atļaujas." }],
+          content: [{ type: "text", text: "Forbidden: Missing 'mcp:tools' scope." }],
           isError: true
         };
       }
 
-      // TypeSafe Jev izsaukuma parametru (runtime arguments) validācija
+      // TypeSafe Jev runtime arguments validation
       const inputCheck = TypeSafeJevFilter.inspectInput(args);
       if (!inputCheck.allowed) {
         return {
@@ -251,7 +251,7 @@ export class RemoteMcpSseGateway {
   }
 
   /**
-   * Pievieno Remote SSE un OAuth 2.1 maršrutus Express lietotnei
+   * Mounts Remote SSE and OAuth 2.1 routes on the Express application
    */
   public mountRoutes(app: Express, securityGuard: OAuth2SecurityGuard): void {
     // 1. RFC 9728: OAuth Protected Resource Metadata
@@ -309,7 +309,7 @@ export class RemoteMcpSseGateway {
       "/mcp/sse",
       securityGuard.requireAuth("mcp:connect"),
       async (req: Request, res: Response) => {
-        // SSE buferēšanas novēršana Nginx un Cloudflare starpniekos
+        // Prevent SSE buffering behind Nginx and Cloudflare proxies
         res.setHeader("X-Accel-Buffering", "no");
         res.setHeader("Cache-Control", "no-cache, no-transform");
 
@@ -319,7 +319,7 @@ export class RemoteMcpSseGateway {
 
         const sessionId = transport.sessionId;
 
-        // Ping / Keep-Alive komentāru sūtīšana ik pēc N sekundēm
+        // Send ping / keep-alive comments every N seconds
         const keepAliveTimer = setInterval(() => {
           if (!res.writableEnded) {
             res.write(`: ping ${Date.now()}\n\n`);
@@ -348,7 +348,7 @@ export class RemoteMcpSseGateway {
       }
     );
 
-    // 6. Remote MCP JSON-RPC ziņojumu apstrāde (POST /mcp/messages?sessionId=...)
+    // 6. Remote MCP JSON-RPC message handling (POST /mcp/messages?sessionId=...)
     app.post(
       "/mcp/messages",
       securityGuard.requireAuth("mcp:connect"),
@@ -357,19 +357,19 @@ export class RemoteMcpSseGateway {
         const sessionId = String(req.query.sessionId || "");
 
         if (!sessionId) {
-          return res.status(400).json({ error: "Trūkst sessionId vaicājuma parametra." });
+          return res.status(400).json({ error: "Missing sessionId query parameter." });
         }
 
         const session = this.sessions.get(sessionId);
         if (!session) {
-          return res.status(404).json({ error: `Sesija '${sessionId}' nav atrasta vai ir slēgta.` });
+          return res.status(404).json({ error: `Session '${sessionId}' not found or has been closed.` });
         }
 
-        // Stingra Tenant izolācija: cits nomnieks nedrīkst sūtīt komandas svešai sesijai
+        // Strict Tenant isolation: other tenants cannot send commands to foreign sessions
         if (session.principal.tenantId !== principal.tenantId) {
           return res.status(403).json({
             error: "tenant_isolation_violation",
-            error_description: "Pieeja liegta: sesija pieder citam nomniekam (tenant)."
+            error_description: "Access denied: session belongs to another tenant."
           });
         }
 
@@ -378,7 +378,7 @@ export class RemoteMcpSseGateway {
       }
     );
 
-    // 7. Aktīvo sesiju telemetrija
+    // 7. Active sessions telemetry
     app.get(
       "/mcp/sessions",
       securityGuard.requireAuth("mcp:connect"),
@@ -392,7 +392,7 @@ export class RemoteMcpSseGateway {
   }
 
   /**
-   * Aizver visas aktīvās SSE sesijas (piem., servera apturēšanas brīdī)
+   * Closes all active SSE sessions (e.g., during graceful server shutdown)
    */
   public async closeAllSessions(): Promise<void> {
     for (const session of this.sessions.values()) {

@@ -1,14 +1,14 @@
 /**
  * scripts/test-key-lifecycle.ts
  * 
- * AHP GATE 3 (/test) Atslēgu Dzīvescikla Drošības un Atsaukšanas Tests:
- * 1. Izveidot jaunu pagaidu nomnieka atslēgu caur POST /keys/provision.
- * 2. Pārbaudīt GET /keys ar Master atslēgu — jaunajai atslēgai jābūt sarakstā ar statusu 'active'.
- * 3. Pārbaudīt GET /keys un DELETE /keys/:keyId bez Master atslēgas -> 401 Unauthorized.
- * 4. Pārbaudīt ar nomnieka atslēgu -> 403 Forbidden (insufficient_scope).
- * 5. Izsaukt DELETE /keys/:keyId ar Master atslēgu -> 200 OK (anulēta).
- * 6. Izsaukt POST /mcp/messages ar anulēto atslēgu -> 401 Unauthorized (error="token_revoked").
- * 7. Pārbaudīt dzēšanu neeksistējošai atslēgai -> 404 Not Found.
+ * AHP GATE 3 (/test) Key Lifecycle Management & Revocation Test:
+ * 1. Provision new temporary tenant key via POST /keys/provision.
+ * 2. Verify GET /keys with Master key — new key must be listed with status 'active'.
+ * 3. Verify GET /keys and DELETE /keys/:keyId without Master key -> 401 Unauthorized.
+ * 4. Verify with tenant key -> 403 Forbidden (insufficient_scope).
+ * 5. Call DELETE /keys/:keyId with Master key -> 200 OK (revoked).
+ * 6. Call POST /mcp/messages with revoked key -> 401 Unauthorized (error="token_revoked").
+ * 7. Verify deletion for non-existent key -> 404 Not Found.
  */
 
 import dotenv from "dotenv";
@@ -44,24 +44,24 @@ async function runStep(
     results.push({ step: code, name, status: "PASS", details: details || undefined });
   } catch (err: any) {
     console.log("FAIL");
-    console.error(`       Kļūda: ${err.message || String(err)}`);
+    console.error(`       Error: ${err.message || String(err)}`);
     results.push({ step: code, name, status: "FAIL", error: err.message || String(err) });
   }
 }
 
 async function main() {
   console.log(`================================================================`);
-  console.log(`  AHP GATE 3: MCPX KEY LIFECYCLE MANAGEMENT DROŠĪBAS TESTS      `);
-  console.log(`  Mērķa vārteja: ${BASE_URL}`);
-  console.log(`  Laika zīmogs: ${new Date().toISOString()}`);
+  console.log(`  AHP GATE 3: MCPX KEY LIFECYCLE MANAGEMENT SECURITY TEST        `);
+  console.log(`  Target Gateway: ${BASE_URL}`);
+  console.log(`  Timestamp: ${new Date().toISOString()}`);
   console.log(`================================================================\n`);
 
   const baseUrlClean = BASE_URL.replace(/\/+$/, "");
   let tempApiKey = "";
   let tempKeyId = "";
 
-  // 1. Solis: Izveidot pagaidu atslēgu caur POST /keys/provision
-  await runStep("L.1", "Pagaidu nomnieka atslēgas izveide (POST /keys/provision)", async () => {
+  // Step 1: Provision temporary tenant key via POST /keys/provision
+  await runStep("L.1", "Temporary tenant key provisioning (POST /keys/provision)", async () => {
     const res = await fetch(`${baseUrlClean}/keys/provision`, {
       method: "POST",
       headers: {
@@ -77,21 +77,21 @@ async function main() {
     });
 
     if (res.status !== 200 && res.status !== 201) {
-      throw new Error(`Gaidīts HTTP 200/201, saņemts ${res.status}: ${await res.text()}`);
+      throw new Error(`Expected HTTP 200/201, received ${res.status}: ${await res.text()}`);
     }
 
     const data = (await res.json()) as any;
     if (!data.success || !data.apiKey || !data.keyId) {
-      throw new Error(`Atbildē trūkst 'apiKey' vai 'keyId': ${JSON.stringify(data)}`);
+      throw new Error(`Response missing 'apiKey' or 'keyId': ${JSON.stringify(data)}`);
     }
 
     tempApiKey = data.apiKey;
     tempKeyId = data.keyId;
-    return `Izveidota atslēga: ${tempKeyId} (${tempApiKey.slice(0, 14)}...)`;
+    return `Created key: ${tempKeyId} (${tempApiKey.slice(0, 14)}...)`;
   });
 
-  // 2. Solis: Pārbaudīt GET /keys ar Master atslēgu — jaunajai atslēgai jābūt sarakstā
-  await runStep("L.2", "Atslēgu inventarizācija (GET /keys ar Master atslēgu)", async () => {
+  // Step 2: Verify GET /keys with Master key — new key must appear in active list
+  await runStep("L.2", "Key inventory query (GET /keys with Master key)", async () => {
     const res = await fetch(`${baseUrlClean}/keys`, {
       method: "GET",
       headers: {
@@ -102,55 +102,55 @@ async function main() {
     });
 
     if (res.status !== 200) {
-      throw new Error(`Gaidīts HTTP 200 OK, saņemts ${res.status}: ${await res.text()}`);
+      throw new Error(`Expected HTTP 200 OK, received ${res.status}: ${await res.text()}`);
     }
 
     const data = (await res.json()) as any;
     if (!data.success || !Array.isArray(data.keys)) {
-      throw new Error(`Nederīgs atbildes formāts: ${JSON.stringify(data)}`);
+      throw new Error(`Invalid response format: ${JSON.stringify(data)}`);
     }
 
     const found = data.keys.find((k: any) => k.keyId === tempKeyId);
     if (!found) {
-      throw new Error(`Tikko izveidotā atslēga ${tempKeyId} netika atrasta sarakstā!`);
+      throw new Error(`Newly created key ${tempKeyId} was not found in key list!`);
     }
 
     if (found.status !== "active") {
-      throw new Error(`Atslēgas statuss nav 'active': ${found.status}`);
+      throw new Error(`Key status is not 'active': ${found.status}`);
     }
 
-    // Pārliecināmies, ka pilnais noslēpums nav nopludināts
+    // Verify secret key is masked and not leaked
     if (JSON.stringify(data).includes(tempApiKey)) {
-      throw new Error(`DROŠĪBAS PĀRKĀPUMS: Pilnā API atslēga ir atklāta GET /keys sarakstā!`);
+      throw new Error(`SECURITY VIOLATION: Full secret API key exposed in GET /keys list!`);
     }
 
-    return `Atrasta atslēga ${tempKeyId} ar statusu '${found.status}', maskētā vērtība: ${found.maskedKey}`;
+    return `Found key ${tempKeyId} with status '${found.status}', masked value: ${found.maskedKey}`;
   });
 
-  // 3. Solis: Pārbaudīt GET /keys un DELETE /keys/:keyId bez Master atslēgas -> 401 Unauthorized
-  await runStep("L.3", "Neautorizēta piekļuve GET /keys un DELETE /keys/:id (401 Unauthorized)", async () => {
-    // GET /keys bez galvenes
+  // Step 3: Verify GET /keys and DELETE /keys/:keyId without Master key -> 401 Unauthorized
+  await runStep("L.3", "Unauthorized access to GET /keys and DELETE /keys/:id (401 Unauthorized)", async () => {
+    // GET /keys without header
     const resGet = await fetch(`${baseUrlClean}/keys`, { redirect: "manual" });
     if (resGet.status !== 401) {
-      throw new Error(`GET /keys bez galvenes: gaidīts 401, saņemts ${resGet.status}`);
+      throw new Error(`GET /keys without header: expected 401, received ${resGet.status}`);
     }
 
-    // DELETE /keys/:id bez galvenes
+    // DELETE /keys/:id without header
     const resDel = await fetch(`${baseUrlClean}/keys/${tempKeyId}`, {
       method: "DELETE",
       redirect: "manual",
     });
     if (resDel.status !== 401) {
-      throw new Error(`DELETE /keys/:id bez galvenes: gaidīts 401, saņemts ${resDel.status}`);
+      throw new Error(`DELETE /keys/:id without header: expected 401, received ${resDel.status}`);
     }
 
     const wwwAuth = resGet.headers.get("www-authenticate") || "";
-    return `GET un DELETE veiksmīgi bloķēti ar HTTP 401 | WWW-Authenticate: ${wwwAuth}`;
+    return `GET and DELETE successfully blocked with HTTP 401 | WWW-Authenticate: ${wwwAuth}`;
   });
 
-  // 4. Solis: Pārbaudīt ar nomnieka atslēgu -> 403 Forbidden (insufficient_scope)
-  await runStep("L.4", "Nomnieka privilēģiju eskalācijas bloķēšana (403 Forbidden)", async () => {
-    // Nomnieks mēģina izgūt visas atslēgas
+  // Step 4: Verify with tenant key -> 403 Forbidden (insufficient_scope)
+  await runStep("L.4", "Tenant privilege escalation prevention (403 Forbidden)", async () => {
+    // Tenant attempts to retrieve all keys
     const resGet = await fetch(`${baseUrlClean}/keys`, {
       method: "GET",
       headers: { "Authorization": `Bearer ${TENANT_KEY}` },
@@ -158,10 +158,10 @@ async function main() {
     });
 
     if (resGet.status !== 403) {
-      throw new Error(`Nomnieks GET /keys: gaidīts 403, saņemts ${resGet.status}`);
+      throw new Error(`Tenant GET /keys: expected 403, received ${resGet.status}`);
     }
 
-    // Nomnieks mēģina dzēst atslēgu
+    // Tenant attempts to delete a key
     const resDel = await fetch(`${baseUrlClean}/keys/${tempKeyId}`, {
       method: "DELETE",
       headers: { "Authorization": `Bearer ${TENANT_KEY}` },
@@ -169,14 +169,14 @@ async function main() {
     });
 
     if (resDel.status !== 403) {
-      throw new Error(`Nomnieks DELETE /keys: gaidīts 403, saņemts ${resDel.status}`);
+      throw new Error(`Tenant DELETE /keys: expected 403, received ${resDel.status}`);
     }
 
-    return `Nomnieka mēģinājums pārvaldīt atslēgas pārtverts ar HTTP 403 Forbidden`;
+    return `Tenant key management attempt intercepted with HTTP 403 Forbidden`;
   });
 
-  // 5. Solis: Izsaukt DELETE /keys/:keyId ar Master atslēgu -> 200 OK (anulēta)
-  await runStep("L.5", "Atslēgas tūlītēja anulēšana (DELETE /keys/:keyId ar Master atslēgu)", async () => {
+  // Step 5: Call DELETE /keys/:keyId with Master key -> 200 OK (revoked)
+  await runStep("L.5", "Immediate key revocation (DELETE /keys/:keyId with Master key)", async () => {
     const res = await fetch(`${baseUrlClean}/keys/${tempKeyId}`, {
       method: "DELETE",
       headers: { "Authorization": `Bearer ${MASTER_KEY}` },
@@ -184,19 +184,19 @@ async function main() {
     });
 
     if (res.status !== 200) {
-      throw new Error(`Gaidīts HTTP 200 OK, saņemts ${res.status}: ${await res.text()}`);
+      throw new Error(`Expected HTTP 200 OK, received ${res.status}: ${await res.text()}`);
     }
 
     const data = (await res.json()) as any;
     if (!data.success || data.status !== "revoked") {
-      throw new Error(`Nederīga atbilde: ${JSON.stringify(data)}`);
+      throw new Error(`Invalid response: ${JSON.stringify(data)}`);
     }
 
-    return `HTTP 200 OK | Atslēga ${data.keyId} anulēta laika zīmogā ${data.revokedAt}`;
+    return `HTTP 200 OK | Key ${data.keyId} revoked at timestamp ${data.revokedAt}`;
   });
 
-  // 6. Solis: Izsaukt POST /mcp/messages ar tikko anulēto atslēgu -> 401 Unauthorized (error="token_revoked")
-  await runStep("L.6", "Anulētas atslēgas tūlītēja bloķēšana (gaidīts 401 error=token_revoked)", async () => {
+  // Step 6: Call POST /mcp/messages with revoked key -> 401 Unauthorized (error="token_revoked")
+  await runStep("L.6", "Immediate blocking of revoked key (expected 401 error=token_revoked)", async () => {
     const payload = {
       jsonrpc: "2.0",
       id: 201,
@@ -215,19 +215,19 @@ async function main() {
     });
 
     if (res.status !== 401) {
-      throw new Error(`Gaidīts HTTP 401 Unauthorized, saņemts ${res.status}: ${await res.text()}`);
+      throw new Error(`Expected HTTP 401 Unauthorized, received ${res.status}: ${await res.text()}`);
     }
 
     const wwwAuth = res.headers.get("www-authenticate") || "";
     if (!wwwAuth.includes("token_revoked")) {
-      throw new Error(`WWW-Authenticate galvenē trūkst 'token_revoked': '${wwwAuth}'`);
+      throw new Error(`WWW-Authenticate header missing 'token_revoked': '${wwwAuth}'`);
     }
 
     return `HTTP 401 Unauthorized | WWW-Authenticate: ${wwwAuth}`;
   });
 
-  // 7. Solis: Dzēšana neeksistējošai atslēgai -> 404 Not Found
-  await runStep("L.7", "Neeksistējoša keyId dzēšanas mēģinājums (gaidīts 404 Not Found)", async () => {
+  // Step 7: Deletion of non-existent key -> 404 Not Found
+  await runStep("L.7", "Deletion attempt of non-existent keyId (expected 404 Not Found)", async () => {
     const res = await fetch(`${baseUrlClean}/keys/key_nonexistent_999999`, {
       method: "DELETE",
       headers: { "Authorization": `Bearer ${MASTER_KEY}` },
@@ -235,17 +235,17 @@ async function main() {
     });
 
     if (res.status !== 404) {
-      throw new Error(`Gaidīts HTTP 404 Not Found, saņemts ${res.status}: ${await res.text()}`);
+      throw new Error(`Expected HTTP 404 Not Found, received ${res.status}: ${await res.text()}`);
     }
 
-    return `HTTP 404 Not Found sekmīgi atgriezts`;
+    return `HTTP 404 Not Found returned successfully`;
   });
 
   console.log(`\n================================================================`);
-  console.log(`  VERIFIKĀCIJAS KOPSAVILKUMS:`);
+  console.log(`  VERIFICATION SUMMARY:`);
   const failed = results.filter((r) => r.status === "FAIL");
   const passed = results.filter((r) => r.status === "PASS");
-  console.log(`  Kopā soļi: ${results.length} | Sekmīgi: ${passed.length} | Kļūdas: ${failed.length}`);
+  console.log(`  Total steps: ${results.length} | Passed: ${passed.length} | Failed: ${failed.length}`);
   console.log(`================================================================\n`);
 
   if (failed.length > 0) {
@@ -254,6 +254,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Kritiska kļūda dzīvescikla testa izpildē:", err);
+  console.error("Critical error during lifecycle test execution:", err);
   process.exit(1);
 });

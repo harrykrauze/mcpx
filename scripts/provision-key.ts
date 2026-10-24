@@ -1,9 +1,9 @@
 /**
  * scripts/provision-key.ts
  * 
- * Administratora CLI rīks jaunu Scoped API atslēgu drošai ģenerēšanai mcpx vārtejā.
+ * Administrator CLI tool for provisioning scoped API keys on mcpx gateway.
  * 
- * Lietošana:
+ * Usage:
  *   npm run key:provision -- --tenant "client-alpha" --desc "Claude Code Enterprise" --rate 30
  */
 
@@ -46,7 +46,7 @@ function parseArgs(args: string[]): CliArgs {
       if (!desc) desc = n;
     } else if ((arg === "--balance" || arg === "-b" || arg === "--initialBalance") && args[i + 1]) {
       balance = parseInt(args[++i], 10);
-    } else if (arg.startsWith("--balance=") || arg.startsWith("--initialBalance=")) {
+    } else if (arg.startsWith("--balance=")) {
       balance = parseInt(arg.split("=")[1], 10);
     } else if ((arg === "--tenant" || arg === "-t") && args[i + 1]) {
       tenant = args[++i];
@@ -87,7 +87,7 @@ function parseArgs(args: string[]): CliArgs {
     } else if (arg.startsWith("--key=")) {
       masterKey = arg.split("=")[1];
     } else if (!arg.startsWith("-")) {
-      // Positional fallback atbalsts
+      // Positional fallback support
       if (!tenant) tenant = arg;
       else if (!desc) desc = arg;
       else if (rate === 10 && !isNaN(parseInt(arg, 10))) rate = parseInt(arg, 10);
@@ -95,7 +95,7 @@ function parseArgs(args: string[]): CliArgs {
   }
 
   if (!tenant) {
-    // Ja nav norādīts, ģenerējam nejaušu testa tenantu
+    // If unspecified, generate a random test tenant
     const randomSuffix = Math.floor(Math.random() * 10000);
     tenant = `tenant-cli-${randomSuffix}`;
   }
@@ -107,21 +107,21 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   console.log(`================================================================`);
-  console.log(`  MCPX ADMINISTRATORA ATSLĒGU PROVISIONĒŠANAS CLI              `);
-  console.log(`  Mērķa vārteja: ${args.url}`);
-  console.log(`  Tenants: ${args.tenant}`);
-  if (args.desc) console.log(`  Apraksts: ${args.desc}`);
-  console.log(`  Plāns: ${args.plan} | Rate Limit: ${args.rate} req/min`);
+  console.log(`  MCPX ADMINISTRATOR KEY PROVISIONING CLI                       `);
+  console.log(`  Target Gateway: ${args.url}`);
+  console.log(`  Tenant: ${args.tenant}`);
+  if (args.desc) console.log(`  Description: ${args.desc}`);
+  console.log(`  Plan: ${args.plan} | Rate Limit: ${args.rate} req/min`);
   if (typeof args.balance === "number") {
-    console.log(`  Sākotnējā bilance: $${(args.balance / 100).toFixed(2)} (${args.balance} c / credits)`);
+    console.log(`  Initial Balance: $${(args.balance / 100).toFixed(2)} (${args.balance} cents)`);
   }
-  console.log(`  Tiesības: ${args.scopes.join(", ")}`);
-  if (args.expires) console.log(`  Termiņš: ${args.expires} dienas`);
+  console.log(`  Scopes: ${args.scopes.join(", ")}`);
+  if (args.expires) console.log(`  Expires: ${args.expires} days`);
   console.log(`================================================================\n`);
 
   if (!args.masterKey) {
-    console.error("KĻŪDA: Trūkst administratora noslēpuma.");
-    console.error("Lūdzu, iestatiet vides mainīgo MCPX_MASTER_KEY vai norādiet parametru --key <MASTER_KEY>.");
+    console.error("ERROR: Missing master administrator key.");
+    console.error("Please set the MCPX_MASTER_KEY environment variable or specify --key <MASTER_KEY>.");
     process.exit(1);
   }
 
@@ -138,7 +138,7 @@ async function main() {
   }
 
   const endpoint = `${args.url.replace(/\/+$/, "")}/keys/provision`;
-  console.log(`Sūtām pieprasījumu uz: ${endpoint}...`);
+  console.log(`Sending request to: ${endpoint}...`);
 
   try {
     const res = await fetch(endpoint, {
@@ -152,32 +152,32 @@ async function main() {
 
     if (!res.ok) {
       const errorText = await res.text();
-      console.error(`Neizdevās izsniegt atslēgu (HTTP ${res.status}): ${errorText}`);
+      console.error(`Failed to provision key (HTTP ${res.status}): ${errorText}`);
       process.exit(1);
     }
 
     const data = (await res.json()) as any;
-    console.log("\n✅ ATSLĒGA VEIKSMĪGI IZVEIDOTA!\n");
-    console.log(`  API Atslēga:  ${data.apiKey}`);
+    console.log("\n✅ KEY SUCCESSFULLY CREATED!\n");
+    console.log(`  API Key:      ${data.apiKey}`);
     if (data.keyId) console.log(`  Key ID:       ${data.keyId}`);
     console.log(`  Tenant ID:    ${data.tenantId || data.userId}`);
     if (data.billing) {
-      console.log(`  Bilance:      $${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} credits / cents)`);
+      console.log(`  Balance:      $${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} cents)`);
     }
-    console.log(`  Plāns:        ${data.plan}`);
-    console.log(`  Statuss:      ${data.status}`);
+    console.log(`  Plan:         ${data.plan}`);
+    console.log(`  Status:       ${data.status}`);
     console.log(`  Rate Limit:   ${data.rateLimit} req/min`);
-    console.log(`  Izveidota:    ${data.createdAt}`);
-    if (data.expiresAt) console.log(`  Derīga līdz:  ${data.expiresAt}`);
-    console.log("\nLai izmantotu Claude Code, palaidiet:");
+    console.log(`  Created At:   ${data.createdAt}`);
+    if (data.expiresAt) console.log(`  Expires At:   ${data.expiresAt}`);
+    console.log("\nTo use with Claude Code, run:");
     console.log(`  claude mcp add --transport sse mcpx ${args.url}/mcp/sse --header "Authorization: Bearer ${data.apiKey}"\n`);
   } catch (err: any) {
-    console.error("Tīkla kļūda izpildot provisionēšanu:", err.message || err);
+    console.error("Network error during provisioning:", err.message || err);
     process.exit(1);
   }
 }
 
 main().catch((err) => {
-  console.error("Kritiska kļūda:", err);
+  console.error("Critical error:", err);
   process.exit(1);
 });

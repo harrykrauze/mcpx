@@ -9,7 +9,7 @@ export async function executeL1Repair(
 ): Promise<string> {
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) {
-    throw new Error("Trūkst GEMINI_API_KEY vides mainīgā L1 labotāja izsaukumam.");
+    throw new Error("Missing GEMINI_API_KEY environment variable for L1 repairer.");
   }
 
   const ai = new GoogleGenAI({ apiKey: key });
@@ -24,7 +24,7 @@ export async function executeL1Repair(
     config: {
       systemInstruction,
       temperature: 0.1,
-      // Flash režīmā domāšanas slieksnis ir minimāls
+      // Minimal thinking budget in Flash mode for deterministic quick repair
       thinkingConfig: {
         thinkingBudget: 0
       }
@@ -36,7 +36,7 @@ export async function executeL1Repair(
 }
 
 export function sanitizeOutput(raw: string): string {
-  // Noņem koda bloku marķierus, ja modelis tos iekļāvis
+  // Strip code block fences if included by model output
   let clean = raw.trim();
   if (clean.startsWith("```typescript")) {
     clean = clean.slice("```typescript".length);

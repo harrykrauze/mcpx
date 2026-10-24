@@ -1,20 +1,20 @@
-# mcpx Klientu Integrācija (Claude Code & Cursor)
+# mcpx Client Integration (Claude Code & Cursor)
 
-Šī mape satur deterministiskus konfigurācijas šablonus `mcpx` MCP vārtejas (`https://mcpx.harrykrauze.com`) pieslēgšanai AI izstrādes aģentos — **Claude Code** un **Cursor IDE**.
+This directory contains deterministic configuration templates for connecting the `mcpx` MCP gateway (`https://mcpx.harrykrauze.com`) to AI developer agents — **Claude Code** and **Cursor IDE**.
 
 ---
 
-## 1. Claude Code Integrācija
+## 1. Claude Code Integration
 
-### A variants: Tiešā termināļa komanda (Ieteicams)
-Pievienojiet attālināto `mcpx` serveri savai Claude Code sesijai, izmantojot oficiālo CLI komandu:
+### Option A: Direct Terminal Command (Recommended)
+Add the remote `mcpx` server to your Claude Code session using the official CLI command:
 
 ```bash
-claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <TAVA_MCPX_API_ATSLĒGA>"
+claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <YOUR_MCPX_API_KEY>"
 ```
 
-### B variants: Konfigurācijas fails (`claude-code.json`)
-Iekopējiet faila saturu savā projekta saknes `.mcp.json` vai globālajā `~/.claude.json` konfigurācijā:
+### Option B: Configuration File (`claude-code.json`)
+Copy the file contents into your project root `.mcp.json` or global `~/.claude.json` configuration:
 
 ```json
 {
@@ -29,16 +29,16 @@ Iekopējiet faila saturu savā projekta saknes `.mcp.json` vai globālajā `~/.c
 }
 ```
 
-Pārliecinieties, ka vides mainīgais `MCPX_API_KEY` ir definēts jūsu čaulā (`export MCPX_API_KEY="..."` vai `.env`).
+Ensure the environment variable `MCPX_API_KEY` is exported in your shell environment (`export MCPX_API_KEY="..."` or `.env`).
 
 ---
 
-## 2. Cursor IDE Integrācija
+## 2. Cursor IDE Integration
 
-Cursor atbalsta MCP serverus caur projekta saknes `.cursor/mcp.json` failu vai globālajiem iestatījumiem (*Settings -> Features -> MCP*).
+Cursor supports MCP servers via project-level `.cursor/mcp.json` or global settings (*Settings -> Features -> MCP*).
 
-### Konfigurācija: `.cursor/mcp.json`
-Izveidojiet failu `.cursor/mcp.json` sava projekta saknē ar šādu saturu:
+### Configuration: `.cursor/mcp.json`
+Create `.cursor/mcp.json` in your project root with the following content:
 
 ```json
 {
@@ -53,42 +53,47 @@ Izveidojiet failu `.cursor/mcp.json` sava projekta saknē ar šādu saturu:
 }
 ```
 
-Aizstājiet `YOUR_MCPX_API_KEY` ar savu aktīvo API atslēgu.
+Replace `YOUR_MCPX_API_KEY` with your active API key.
 
 ---
 
-## 3. API Atslēgas Iegūšana un Pārvaldība
+## 3. API Key Provisioning and Management
 
-`mcpx` vārteja atbalsta divu līmeņu autentifikāciju:
-1. **Master Administratora atslēga:** Izvietota Cloudflare noslēpumos (`MCPX_API_KEY`).
-2. **Daudzlietotāju Scoped atslēgas:** Glabātas Cloudflare KV (`MCPX_KEYS`).
+The `mcpx` gateway supports two-tier authentication:
+1. **Master Administrator Key:** Stored in Cloudflare secrets (`MCPX_API_KEY`).
+2. **Multi-tenant Scoped Keys:** Stored in Cloudflare KV (`MCPX_KEYS`).
 
-### Jaunas Scoped API atslēgas izsniegšana:
-Izmantojot Master administratora atslēgu, nosūtiet pieprasījumu uz provisionēšanas galapunktu:
+### Provisioning a New Scoped API Key:
+Using the Master administrator key, send a POST request to the provisioning endpoint:
 
 ```bash
 curl -X POST https://mcpx.harrykrauze.com/keys/provision \
   -H "Authorization: Bearer <MASTER_ADMIN_KEY>" \
   -H "Content-Type: application/json" \
-  -d '{"userId": "developer-alice", "plan": "pro"}'
+  -d '{"tenantId": "developer-alice", "plan": "pro", "initialBalanceCents": 1000}'
 ```
 
-Atbildē saņemsiet jaunu aktīvu atslēgu:
+You will receive the newly generated active key in the JSON response:
 ```json
 {
   "success": true,
   "apiKey": "mcpx_live_...",
-  "userId": "developer-alice",
+  "keyId": "key_...",
+  "tenantId": "developer-alice",
   "plan": "pro",
-  "status": "active"
+  "status": "active",
+  "billing": {
+    "balanceCents": 1000,
+    "totalSpentCents": 0
+  }
 }
 ```
 
 ---
 
-## 4. Savienojuma Verifikācija
+## 4. Connection Verification
 
-Lai deterministiski pārbaudītu, vai klients spēj veiksmīgi veikt SSE rokasspiedienu un izgūt rīku sarakstu (`tools/list`), palaidiet:
+To deterministically verify that the client can complete the SSE handshake and list available tools (`tools/list`), execute:
 
 ```bash
 npm run test:client-connection

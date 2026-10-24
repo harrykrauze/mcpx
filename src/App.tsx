@@ -26,7 +26,7 @@ function handleCreemCheckout(tier: CreditTier, activeKey: string) {
   const baseUrl = CREEM_CHECKOUT_URLS[tier];
   const checkoutUrl = new URL(baseUrl);
 
-  // Parametri webhook atslēgas identifikācijai un novirzīšanai
+  // Parameters for webhook key identification and redirect routing
   checkoutUrl.searchParams.set("custom_field_key_id", activeKey);
   checkoutUrl.searchParams.set("key_id", activeKey);
   checkoutUrl.searchParams.set("return_url", "https://mcpx.harrykrauze.com/?payment=success");

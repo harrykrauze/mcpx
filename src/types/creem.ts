@@ -1,8 +1,8 @@
 /**
  * src/types/creem.ts
  * 
- * Creem.io Webhook Datu Shēmas un Tipu Definīcijas.
- * Stingrs centu standarts: 'amount' TIKAI vesels skaitlis (integer USD cents).
+ * Creem.io Webhook Data Schemas and Type Definitions.
+ * Strict cents standard: 'amount' strictly integer (integer USD cents).
  */
 
 export interface CreemCustomer {

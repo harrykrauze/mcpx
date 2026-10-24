@@ -1,15 +1,15 @@
 /**
  * src/tools/domainTools.ts
  * 
- * Deterministiski inženiertehniskie un semantiskās drošības domēna rīki:
- * 1. calculateUValueIso6946: EN ISO 6946 daudzslāņu būvkonstrukciju siltuma caurlaidības un pretestības kalkulators.
- * 2. analyzeJevSemanticAst: Statiskās koda analīzes un injekciju noteikšanas rīks balstīts uz Jev filtru.
+ * Deterministic engineering and semantic security domain tools:
+ * 1. calculateUValueIso6946: EN ISO 6946 multilayer building envelope thermal transmittance & resistance calculator.
+ * 2. analyzeJevSemanticAst: Static code analysis and injection vulnerability detector based on Jev filter.
  */
 
 import { TypeSafeJevFilter } from "../core/jevFilter";
 
 // ============================================================================
-// 1. EN ISO 6946 Būvfizikas Kalkulators
+// 1. EN ISO 6946 Building Physics Calculator
 // ============================================================================
 
 export interface LayerInput {
@@ -63,7 +63,7 @@ export function calculateUValueIso6946(input: UValueCalculationInput): UValueCal
   const rse = typeof input.rse === "number" && input.rse >= 0 ? input.rse : defaults.rse;
 
   if (!Array.isArray(input.layers) || input.layers.length === 0) {
-    throw new Error("Norobežojošajai konstrukcijai jābūt vismaz vienam slānim ('layers').");
+    throw new Error("Building assembly must contain at least one layer ('layers').");
   }
 
   let sumR = 0;
@@ -75,16 +75,16 @@ export function calculateUValueIso6946(input: UValueCalculationInput): UValueCal
     const lambda = Number(l.lambda_w_mk ?? l.lambda ?? l.thermalConductivity);
 
     if (isNaN(d) || d <= 0) {
-      throw new Error(`Slānim #${i + 1} ('${l.name || "unnamed"}') biezumam 'thickness_m'/'thickness' jābūt pozitīvam skaitlim.`);
+      throw new Error(`Layer #${i + 1} ('${l.name || "unnamed"}') thickness 'thickness_m'/'thickness' must be a positive number.`);
     }
     if (isNaN(lambda) || lambda <= 0) {
-      throw new Error(`Slānim #${i + 1} ('${l.name || "unnamed"}') siltumvadītspējai 'lambda_w_mk'/'lambda' jābūt pozitīvam skaitlim.`);
+      throw new Error(`Layer #${i + 1} ('${l.name || "unnamed"}') thermal conductivity 'lambda_w_mk'/'lambda' must be a positive number.`);
     }
 
     const r = d / lambda;
     sumR += r;
     rawLayers.push({
-      name: l.name || `Slānis ${i + 1}`,
+      name: l.name || `Layer ${i + 1}`,
       d,
       lambda,
       r,
@@ -102,12 +102,12 @@ export function calculateUValueIso6946(input: UValueCalculationInput): UValueCal
     percentage: Math.round((l.r / rTot) * 1000) / 10,
   }));
 
-  // Kondensācijas riska analīze (Heuristiskā pārbaude pēc būvfizikas principiem):
-  // Riska faktors: siltumizolācija izvietota iekšpusē pirms masīvas nesošās konstrukcijas
+  // Condensation risk analysis (heuristic building physics evaluation):
+  // Risk factor: thermal insulation placed on interior side before massive structural layer
   let condensationRisk = false;
   const notes: string[] = [];
 
-  // Meklējam galveno siltumizolācijas slāni (lielākā R vērtība)
+  // Find primary thermal insulation layer (highest R value)
   let maxRIdx = 0;
   let maxRVal = 0;
   for (let i = 0; i < rawLayers.length; i++) {
@@ -117,13 +117,13 @@ export function calculateUValueIso6946(input: UValueCalculationInput): UValueCal
     }
   }
 
-  // Ja galvenā izolācija veido > 50% no pretestības un atrodas kā pirmais slānis (iekšpusē),
-  // bet aiz tās seko biezs masīvs materiāls (d >= 0.1m, lambda >= 0.8), pastāv kondensāta risks
+  // If primary insulation accounts for > 50% of resistance and is the first (interior) layer,
+  // followed by a thick dense layer (d >= 0.1m, lambda >= 0.7), flag condensation risk
   if (maxRIdx === 0 && rawLayers.length > 1) {
     const nextLayer = rawLayers[1];
     if (nextLayer.d >= 0.1 && nextLayer.lambda >= 0.7) {
       condensationRisk = true;
-      notes.push("Brīdinājums: Siltumizolācijas slānis izvietots konstrukcijas iekšpusē pirms masīva nesošā slāņa — augsts iekšējā kondensāta risks pie starpslāņa saskares.");
+      notes.push("Warning: Thermal insulation layer located on the interior side before a massive structural layer — high risk of interstitial condensation at layer interface.");
     }
   }
 
@@ -141,7 +141,7 @@ export function calculateUValueIso6946(input: UValueCalculationInput): UValueCal
 }
 
 // ============================================================================
-// 2. Jev Semantiskais AST Koda Drošības Rīks
+// 2. Jev Semantic AST Code Safety Tool
 // ============================================================================
 
 export interface JevAstInput {
@@ -165,9 +165,9 @@ export interface JevAstResult {
 }
 
 const PARANOID_PATTERNS = [
-  { pattern: /\b(setTimeout|setInterval|setImmediate)\b/, rule: "TIMER_DELAY_PROHIBITED", msg: "Taimeru aizture ir bloķēta paranoid režīmā." },
-  { pattern: /\bqueueMicrotask\b/, rule: "MICROTASK_PROHIBITED", msg: "queueMicrotask asinhronā manipulācija bloķēta paranoid režīmā." },
-  { pattern: /\bwhile\s*\(\s*(true|1)\s*\)/, rule: "INFINITE_LOOP_RISK", msg: "Iespējama bezgalīgā cikla riska konstrukcija while(true)." },
+  { pattern: /\b(setTimeout|setInterval|setImmediate)\b/, rule: "TIMER_DELAY_PROHIBITED", msg: "Timer delays are prohibited in paranoid mode." },
+  { pattern: /\bqueueMicrotask\b/, rule: "MICROTASK_PROHIBITED", msg: "queueMicrotask asynchronous execution is prohibited in paranoid mode." },
+  { pattern: /\bwhile\s*\(\s*(true|1)\s*\)/, rule: "INFINITE_LOOP_RISK", msg: "Potential infinite loop risk detected with while(true)." },
 ];
 
 export function analyzeJevSemanticAst(input: JevAstInput): JevAstResult {
@@ -191,11 +191,11 @@ export function analyzeJevSemanticAst(input: JevAstInput): JevAstResult {
     };
   }
 
-  // 1. Pārbaude ar TypeSafeJevFilter (Bāzes kārtula)
+  // 1. Base rule inspection with TypeSafeJevFilter
   const jevRes = TypeSafeJevFilter.inspectCode(code);
   const violations: string[] = jevRes.violations.map((v) => `[${v.severity}] ${v.rule}: ${v.message}`);
 
-  // 2. Specifisko šablonu klasifikācija
+  // 2. Specific pattern classification
   const detected = {
     prototype_manipulation: /\b(__proto__|constructor\s*\.\s*constructor|setPrototypeOf|defineProperty)\b/.test(code),
     dynamic_execution: /\b(eval\s*\(|Function\s*\(|AsyncFunction|GeneratorFunction)\b/.test(code),
@@ -203,7 +203,7 @@ export function analyzeJevSemanticAst(input: JevAstInput): JevAstResult {
     network_or_ssrf_attempt: /\b(fetch\s*\(|XMLHttpRequest|WebSocket|http\.|https\.|net\.|tls\.)/.test(code),
   };
 
-  // 3. Paranoid režīma papildu pārbaudes
+  // 3. Paranoid mode additional checks
   if (strictness === "paranoid") {
     for (const p of PARANOID_PATTERNS) {
       if (p.pattern.test(code)) {
@@ -212,7 +212,7 @@ export function analyzeJevSemanticAst(input: JevAstInput): JevAstResult {
     }
   }
 
-  // 4. Deterministisks riska rādītāja aprēķins (0-100)
+  // 4. Deterministic risk score calculation (0-100)
   let riskScore = 0;
   for (const v of jevRes.violations) {
     if (v.severity === "CRITICAL") riskScore += 45;
@@ -228,7 +228,7 @@ export function analyzeJevSemanticAst(input: JevAstInput): JevAstResult {
 
   riskScore = Math.min(100, Math.max(0, riskScore));
 
-  // 5. Sprieduma (Verdict) noteikšana
+  // 5. Verdict determination
   let verdict: "SAFE" | "REJECTED" | "WARNING" = "SAFE";
   if (riskScore >= 40 || !jevRes.allowed) {
     verdict = "REJECTED";
@@ -247,7 +247,7 @@ export function analyzeJevSemanticAst(input: JevAstInput): JevAstResult {
 }
 
 // ============================================================================
-// 3. Rīku Sinonīmi un Kanoniskā Nosaukumu Noteikšana (Tool Aliases)
+// 3. Tool Aliases and Canonical Name Resolution
 // ============================================================================
 
 export const TOOL_ALIASES: Record<string, string> = {

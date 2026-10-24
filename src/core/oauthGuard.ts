@@ -41,14 +41,14 @@ interface JwtPayload {
 }
 
 /**
- * Deterministisks SHA-256 hešēšanas palīgs (Zero-LLM)
+ * Deterministic SHA-256 hashing helper (Zero-LLM)
  */
 export function sha256Hex(input: string): string {
   return crypto.createHash("sha256").update(input, "utf8").digest("hex");
 }
 
 /**
- * Droša laika-konstanta virkņu salīdzināšana pret timing uzbrukumiem
+ * Constant-time string comparison preventing timing attacks
  */
 export function timingSafeCompare(a: string, b: string): boolean {
   const bufA = Buffer.from(a, "utf8");
@@ -60,7 +60,7 @@ export function timingSafeCompare(a: string, b: string): boolean {
 }
 
 /**
- * OAuth 2.1 (RFC 9728 / DCR) un Scoped API Keys drošības pārvaldnieks
+ * OAuth 2.1 (RFC 9728 / DCR) and Scoped API Keys security manager
  */
 export class OAuth2SecurityGuard {
   private readonly jwtSecret: string;
@@ -169,7 +169,7 @@ export class OAuth2SecurityGuard {
   }
 
   /**
-   * Izveido PKCE autorizācijas kodu (OAuth 2.1 authorization_code plūsmai ar S256)
+   * Creates a PKCE authorization code (OAuth 2.1 authorization_code flow with S256)
    */
   public createPkceAuthorizationCode(params: {
     clientId: string;
@@ -178,7 +178,7 @@ export class OAuth2SecurityGuard {
   }): string {
     const client = this.clients.get(params.clientId);
     if (!client) {
-      throw new Error("Nezināms client_id");
+      throw new Error("invalid_client: Unknown client_id");
     }
     const code = `mcpx_code_${crypto.randomBytes(12).toString("hex")}`;
     this.pkceCodes.set(code, {
@@ -191,7 +191,7 @@ export class OAuth2SecurityGuard {
   }
 
   /**
-   * OAuth 2.1 Token izsniegšana (client_credentials vai authorization_code ar PKCE S256)
+   * OAuth 2.1 Token exchange (client_credentials or authorization_code with PKCE S256)
    */
   public exchangeToken(params: {
     grant_type: string;
@@ -210,18 +210,18 @@ export class OAuth2SecurityGuard {
   } {
     const client = this.clients.get(params.client_id);
     if (!client) {
-      throw new Error("invalid_client: Klients nav reģistrēts.");
+      throw new Error("invalid_client: Client is not registered.");
     }
 
     let grantedScopes = client.scopes;
 
     if (params.grant_type === "client_credentials") {
       if (!params.client_secret) {
-        throw new Error("invalid_client: Trūkst client_secret.");
+        throw new Error("invalid_client: Missing client_secret.");
       }
       const incomingHash = sha256Hex(params.client_secret);
       if (!timingSafeCompare(incomingHash, client.clientSecretHash)) {
-        throw new Error("invalid_client: Nepareizs client_secret.");
+        throw new Error("invalid_client: Incorrect client_secret.");
       }
       if (params.scope) {
         const reqScopes = params.scope.split(/\s+/).filter(Boolean) as McpScope[];
@@ -229,22 +229,22 @@ export class OAuth2SecurityGuard {
       }
     } else if (params.grant_type === "authorization_code") {
       if (!params.code || !params.code_verifier) {
-        throw new Error("invalid_request: Trūkst code vai PKCE code_verifier.");
+        throw new Error("invalid_request: Missing code or PKCE code_verifier.");
       }
       const pkceEntry = this.pkceCodes.get(params.code);
       if (!pkceEntry || pkceEntry.clientId !== client.clientId || Date.now() > pkceEntry.expiresAt) {
-        throw new Error("invalid_grant: Autorizācijas kods nav derīgs vai ir beidzies.");
+        throw new Error("invalid_grant: Authorization code is invalid or expired.");
       }
       this.pkceCodes.delete(params.code);
 
-      // Verificē PKCE S256: BASE64URL-ENCODE(SHA256(ASCII(code_verifier))) === code_challenge
+      // Verify PKCE S256: BASE64URL-ENCODE(SHA256(ASCII(code_verifier))) === code_challenge
       const computedChallenge = crypto
         .createHash("sha256")
         .update(params.code_verifier, "ascii")
         .digest("base64url");
 
       if (!timingSafeCompare(computedChallenge, pkceEntry.codeChallenge)) {
-        throw new Error("invalid_grant: PKCE S256 code_verifier pārbaude neizdevās.");
+        throw new Error("invalid_grant: PKCE S256 code_verifier verification failed.");
       }
       grantedScopes = pkceEntry.scopes;
     } else {
@@ -274,7 +274,7 @@ export class OAuth2SecurityGuard {
   }
 
   /**
-   * Izveido daudznomināciju (scoped) API atslēgu, glabājot tikai SHA-256 hešu
+   * Creates a scoped API key, persisting only its SHA-256 hash
    */
   public createScopedApiKey(params: {
     tenantId: string;
@@ -303,20 +303,20 @@ export class OAuth2SecurityGuard {
   }
 
   /**
-   * Verificē gan OAuth 2.1 Bearer JWT tokenu, gan Scoped API Key (mcpx_live_...)
+   * Verifies both OAuth 2.1 Bearer JWT tokens and Scoped API Keys (mcpx_live_...)
    */
   public verifyTokenOrApiKey(rawToken: string): AuthenticatedPrincipal {
     const clean = rawToken.replace(/^Bearer\s+/i, "").trim();
     if (!clean) {
-      throw new Error("Tukšs autentifikācijas tokens.");
+      throw new Error("Empty authentication token.");
     }
 
-    // 1. Pārbauda, vai tā ir Scoped API atslēga
+    // 1. Check if token is a Scoped API key
     if (clean.startsWith("mcpx_live_")) {
       const hash = sha256Hex(clean);
       const record = this.apiKeys.get(hash);
       if (!record) {
-        throw new Error("Nederīga vai atsaukta API atslēga.");
+        throw new Error("Invalid or revoked API key.");
       }
       return {
         clientId: record.keyId,
@@ -326,7 +326,7 @@ export class OAuth2SecurityGuard {
       };
     }
 
-    // 2. Pārbauda OAuth 2.1 JWT tokenu
+    // 2. Validate OAuth 2.1 JWT token
     const payload = this.verifyJwt(clean);
     return {
       clientId: payload.sub,
@@ -337,7 +337,7 @@ export class OAuth2SecurityGuard {
   }
 
   /**
-   * Express starpprogrammatūra (Middleware) aizsargātajiem MCP maršrutiem
+   * Express middleware for protected MCP routes
    */
   public requireAuth(requiredScope: McpScope = "mcp:connect") {
     return (req: Request, res: Response, next: NextFunction) => {
@@ -353,7 +353,7 @@ export class OAuth2SecurityGuard {
         );
         return res.status(401).json({
           error: "unauthorized",
-          error_description: "Nepieciešams OAuth 2.1 Bearer tokens vai X-API-Key galvene.",
+          error_description: "OAuth 2.1 Bearer token or X-API-Key header required.",
           resource_metadata: resourceMetaUrl
         });
       }
@@ -366,7 +366,7 @@ export class OAuth2SecurityGuard {
         ) {
           return res.status(403).json({
             error: "insufficient_scope",
-            error_description: `Trūkst nepieciešamās atļaujas (scope): ${requiredScope}`
+            error_description: `Missing required scope: ${requiredScope}`
           });
         }
 
@@ -380,7 +380,7 @@ export class OAuth2SecurityGuard {
         );
         return res.status(401).json({
           error: "invalid_token",
-          error_description: err.message || "Autentifikācijas pārbaude neizdevās.",
+          error_description: err.message || "Authentication failed.",
           resource_metadata: resourceMetaUrl
         });
       }
@@ -400,7 +400,7 @@ export class OAuth2SecurityGuard {
   private verifyJwt(token: string): JwtPayload {
     const parts = token.split(".");
     if (parts.length !== 3) {
-      throw new Error("Nepareizs JWT formāts.");
+      throw new Error("Invalid JWT format.");
     }
     const [header, body, signature] = parts;
     const expectedSig = crypto
@@ -409,31 +409,31 @@ export class OAuth2SecurityGuard {
       .digest("base64url");
 
     if (!timingSafeCompare(signature, expectedSig)) {
-      throw new Error("Nederīgs JWT paraksts.");
+      throw new Error("Invalid JWT signature.");
     }
 
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as JwtPayload;
     const nowSec = Math.floor(Date.now() / 1000);
     const MAX_CLOCK_SKEW_SEC = 30;
 
-    // 1. Obligāta exp termiņa pārbaude (ar 30s clock skew)
+    // 1. Mandatory exp check (with 30s clock skew)
     if (typeof payload.exp !== "number" || nowSec - MAX_CLOCK_SKEW_SEC > payload.exp) {
-      throw new Error("JWT tokena derīguma termiņš ir beidzies vai trūkst exp lauka.");
+      throw new Error("JWT token expired or missing exp claim.");
     }
 
-    // 2. iat nākotnes pārbaude
+    // 2. Mandatory iat future check
     if (typeof payload.iat === "number" && payload.iat > nowSec + MAX_CLOCK_SKEW_SEC) {
-      throw new Error("JWT tokens izdots nākotnē (iat pārkāpums).");
+      throw new Error("JWT token issued in the future (iat violation).");
     }
 
-    // 3. Obligāta iss (Issuer) atbilstības pārbaude
+    // 3. Mandatory iss (Issuer) check
     if (!payload.iss || payload.iss !== this.issuerUrl) {
-      throw new Error(`Nederīgs JWT issuer: gaidīts '${this.issuerUrl}', saņemts '${payload.iss}'.`);
+      throw new Error(`Invalid JWT issuer: expected '${this.issuerUrl}', received '${payload.iss}'.`);
     }
 
-    // 4. Obligāta aud (Audience) atbilstības pārbaude
+    // 4. Mandatory aud (Audience) check
     if (!payload.aud || (payload.aud !== this.resourceId && payload.aud !== this.issuerUrl)) {
-      throw new Error(`Nederīgs JWT audience: gaidīts '${this.resourceId}', saņemts '${payload.aud}'.`);
+      throw new Error(`Invalid JWT audience: expected '${this.resourceId}', received '${payload.aud}'.`);
     }
 
     return payload;

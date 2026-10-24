@@ -14,8 +14,8 @@ export type SandboxStatus = z.infer<typeof SandboxStatusSchema>;
 export const SandboxInputSchema = z.object({
   code: z
     .string()
-    .min(1, "Kods nedrīkst būt tukšs.")
-    .max(64 * 1024, "Koda izmērs nedrīkst pārsniegt 64 KB."),
+    .min(1, "Code cannot be empty.")
+    .max(64 * 1024, "Code size must not exceed 64 KB."),
   inputPayload: z
     .record(z.string(), z.unknown())
     .default({})
@@ -28,13 +28,13 @@ export const SandboxInputSchema = z.object({
           return false;
         }
       },
-      { message: "inputPayload jāsatur tikai stingri JSON-serializējami dati." }
+      { message: "inputPayload must contain strictly JSON-serializable data." }
     ),
   timeoutMs: z
     .number()
     .int()
-    .min(100, "Minimālais pieļaujamais taimauts ir 100 ms.")
-    .max(5000, "Maksimālais pieļaujamais taimauts ir 5000 ms.")
+    .min(100, "Minimum allowable timeout is 100 ms.")
+    .max(5000, "Maximum allowable timeout is 5000 ms.")
     .default(2000),
 });
 
@@ -55,7 +55,7 @@ export interface SandboxExecutionOptions {
 }
 
 /**
- * Sanitizē kļūdu ziņojumus, novēršot informācijas noplūdi par failu sistēmu un steku.
+ * Sanitizes error messages to prevent leakage of filesystem paths and stack frames.
  */
 export function sanitizeError(rawError: string): string {
   if (!rawError || typeof rawError !== "string") {
@@ -63,20 +63,20 @@ export function sanitizeError(rawError: string): string {
   }
 
   return rawError
-    // Noņem Windows absolūtos ceļus (piem., C:\Users\... vai C:/...)
+    // Strip Windows absolute paths (e.g., C:\Users\... or C:/...)
     .replace(/[a-zA-Z]:[\\/][^:\r\n)]+/g, "[sanitized_path]")
-    // Noņem Unix/POSIX absolūtos ceļus (/home/..., /var/..., /tmp/...)
+    // Strip Unix/POSIX absolute paths (/home/..., /var/..., /tmp/...)
     .replace(/\/(?:home|var|tmp|usr|etc|opt|Users)[^\s:)]+/g, "[sanitized_path]")
-    // Noņem steka rindiņas (at ...)
+    // Strip stack lines (at ...)
     .replace(/^\s*at\s+.*$/gm, "")
-    // Noņem iekšējās node: moduļu atsauces
+    // Strip internal node: module references
     .replace(/node:internal\/[^\s:)]+/g, "[internal]")
-    // Noņem tukšās rindas
+    // Collapse consecutive newlines
     .replace(/\n\s*\n/g, "\n")
     .trim();
 }
 
-// V8 atmiņas un izpildes resursu griesti
+// V8 memory and execution resource ceilings
 export const SANDBOX_RESOURCE_LIMITS = {
   maxOldGenerationSizeMb: 64,
   maxYoungGenerationSizeMb: 16,
@@ -84,7 +84,7 @@ export const SANDBOX_RESOURCE_LIMITS = {
   stackSizeMb: 4,
 };
 
-// Inline Worker kods, kas nodrošina sterilizētu vidi un run-to-completion izpildi
+// Inline Worker code providing sterilized environment and run-to-completion execution
 const WORKER_BOOTSTRAP_CODE = `
 const { parentPort, workerData } = require('node:worker_threads');
 
@@ -120,12 +120,12 @@ export class CodeSandbox {
   }
 
   /**
-   * Izpilda kodu izolētā node:worker_threads slānī ar striktiem resursu griestiem un Jev filtru.
+   * Executes code in isolated node:worker_threads layer with strict resource ceilings and Jev filter.
    */
   public static async execute(input: SandboxInput): Promise<SandboxResult> {
     const startTime = Date.now();
 
-    // 1. Validē ieejas datus ar Zod
+    // 1. Validate input data with Zod
     const parsedInput = SandboxInputSchema.safeParse(input);
     if (!parsedInput.success) {
       return {
@@ -138,7 +138,7 @@ export class CodeSandbox {
 
     const { code, inputPayload, timeoutMs } = parsedInput.data;
 
-    // 2. TypeSafe Jev statiskā AST koda pārbaude
+    // 2. TypeSafe Jev static AST code inspection
     const jevCheck = TypeSafeJevFilter.inspectCode(code);
     if (!jevCheck.allowed) {
       return {
@@ -149,7 +149,7 @@ export class CodeSandbox {
       };
     }
 
-    // 3. TypeSafe Jev ieejas parametru pārbaude
+    // 3. TypeSafe Jev input arguments inspection
     const inputCheck = TypeSafeJevFilter.inspectInput(inputPayload);
     if (!inputCheck.allowed) {
       return {
@@ -160,7 +160,7 @@ export class CodeSandbox {
       };
     }
 
-    // 4. Izveido Worker pavedienu ar V8 resourceLimits
+    // 4. Create Worker thread with V8 resourceLimits
     return new Promise<SandboxResult>((resolve) => {
       let isSettled = false;
 
@@ -180,18 +180,18 @@ export class CodeSandbox {
         try {
           await worker.terminate();
         } catch {
-          // Ignorē terminate kļūdu, ja worker jau apturēts
+          // Ignore terminate error if worker is already stopped
         }
         resolve(res);
       };
 
-      // Taimauta uzraudzība
+      // Timeout watchdog
       const timer = setTimeout(async () => {
         await settle({
           status: "timeout",
           result: null,
           executionTimeMs: Date.now() - startTime,
-          errorDetails: `ERR_SCRIPT_EXECUTION_TIMEOUT: Izpildes laiks pārsniedza ${timeoutMs}ms limitu.`,
+          errorDetails: `ERR_SCRIPT_EXECUTION_TIMEOUT: Execution time exceeded ${timeoutMs}ms limit.`,
         });
       }, timeoutMs);
 
@@ -237,7 +237,7 @@ export class CodeSandbox {
   }
 
   /**
-   * Atpakaļejoši savietojama metode esošajiem rīkiem un integrācijas testiem.
+   * Backwards-compatible execution method for existing tools and integration tests.
    */
   public static async executeToolHandler(
     handlerCode: string,

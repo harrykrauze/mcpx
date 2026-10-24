@@ -20,7 +20,7 @@ Deterministic AST code inspection, V8 sandboxed execution, and prepaid L402/x402
 ## Client Integration
 
 ### 1. Claude Code
-Pievieno `mcpx` serveri failā `~/.claude.json` vai sava projekta `.claude/config.json`:
+Add the `mcpx` server to `~/.claude.json` or your project's `.claude/config.json`:
 
 ```json
 {
@@ -36,18 +36,18 @@ Pievieno `mcpx` serveri failā `~/.claude.json` vai sava projekta `.claude/confi
 ```
 
 ### 2. Cursor IDE
-Dodies uz **Cursor Settings > Features > MCP**, spied **Add New MCP Server**:
+Navigate to **Cursor Settings > Features > MCP**, click **Add New MCP Server**:
 - **Name:** `mcpx`
 - **Type:** `sse`
 - **URL:** `https://mcpx.harrykrauze.com/mcp/sse`
 
-Pievieno autorizācijas galveni ar savu atslēgu:
+Add the authorization header with your key:
 ```text
 Authorization: Bearer YOUR_MCPX_API_KEY
 ```
 
 ### 3. Windsurf / Codeium Cascade
-Failā `~/.codeium/windsurf/mcp_config.json`:
+In `~/.codeium/windsurf/mcp_config.json`:
 
 ```json
 {
@@ -72,29 +72,29 @@ Failā `~/.codeium/windsurf/mcp_config.json`:
 | `v8_execute` | **$0.05** (5 credits) | Isolated V8 micro-sandbox evaluation |
 | `health` / `keys/verify` | **Free** ($0.00) | Infrastructure status and active balance query |
 
-Ja bilance sasniedz `0`, vārteja atgriež standarta **HTTP 402 Payment Required** atbildi ar tiešu Creem.io papildināšanas saiti.
+If the balance reaches `0`, the gateway returns a standard **HTTP 402 Payment Required** response with a direct Creem.io top-up link.
 
 ---
 
 ## Top-Up & Key Management
 
-Kredītu papildināšana pieejama tieši caur [mcpx.harrykrauze.com](https://mcpx.harrykrauze.com):
-- **$10.00** — 1,000 kredīti (1,000 AST pārbaudes / 200 V8 izpildes)
-- **$25.00** — 2,500 kredīti (2,500 AST pārbaudes / 500 V8 izpildes)
-- **$50.00** — 5,000 kredīti (5,000 AST pārbaudes / 1,000 V8 izpildes)
+Credit top-ups are available directly at [mcpx.harrykrauze.com](https://mcpx.harrykrauze.com):
+- **$10.00** — 1,000 credits (1,000 AST checks / 200 V8 executions)
+- **$25.00** — 2,500 credits (2,500 AST checks / 500 V8 executions)
+- **$50.00** — 5,000 credits (5,000 AST checks / 1,000 V8 executions)
 
 ---
 
 ## CLI & Local Development
 
 ```bash
-# Atkarību instalēšana
+# Install dependencies
 npm ci --legacy-peer-deps
 
-# Tipu pārbaude un vienībtesti
+# Type checking and unit tests
 npm run typecheck
 npm test
 
-# Lokālā izpilde
+# Local development server
 npx wrangler dev
 ```

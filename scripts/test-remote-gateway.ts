@@ -43,13 +43,13 @@ async function generateComplexToolWithArgon(spec: string): Promise<string> {
       const response = await ai.models.generateContent({
         model: "gemini-4-argon",
         contents: [
-          "Konvertē šo sarežģīto FinTech cURL specifikāciju par pilnīgu, pašpietiekamu TypeScript MCP rīka moduli.",
-          "Prasības:",
-          "1. Eksportē konstanti `TOOL_MANIFEST` ar `{ name: 'evaluate_fraud_transaction', description: string, inputSchema: { type: 'object', properties: {...}, required: [...] } }`.",
-          "2. Definē stingrus TypeScript interfeisus ligzdotajam ievades objektam (`transactionId`, `amount`, `customer`, `lineItems`).",
-          "3. Eksportē asinhrono funkciju `executeFraudEvaluation(args: Record<string, unknown>): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>`.",
-          "4. Funkcijā neveic ārēju tīkla izsaukumu uz neeksistējošo domēnu, bet deterministiski aprēķini riska līmeni un atgriez strukturētu JSON teksta atbildi iekš `CallToolResult`.",
-          "5. Atgriez TIKAI tīru TypeScript kodu bez markdown blokiem.",
+          "Convert this complex FinTech cURL specification into a complete, self-contained TypeScript MCP tool module.",
+          "Requirements:",
+          "1. Export constant `TOOL_MANIFEST` with `{ name: 'evaluate_fraud_transaction', description: string, inputSchema: { type: 'object', properties: {...}, required: [...] } }`.",
+          "2. Define strict TypeScript interfaces for nested input object (`transactionId`, `amount`, `customer`, `lineItems`).",
+          "3. Export async function `executeFraudEvaluation(args: Record<string, unknown>): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }>`.",
+          "4. In the handler, do not make external network calls; deterministically calculate risk score and return structured JSON text inside `CallToolResult`.",
+          "5. Return ONLY clean TypeScript code without markdown fences.",
           "",
           spec
         ].join("\n"),
@@ -63,11 +63,11 @@ async function generateComplexToolWithArgon(spec: string): Promise<string> {
 
       const text = sanitizeOutput(response.text || "");
       if (text.includes("evaluate_fraud_transaction")) {
-        console.log("[Solis 8] Kods veiksmīgi uzģenerēts ar Gemini 4 Argon (thinkingBudget: 2048).");
+        console.log("[Step 8] Code generated successfully with Gemini 4 Argon (thinkingBudget: 2048).");
         return text;
       }
     } catch (err: any) {
-      console.warn(`[Solis 8] Gemini 4 Argon tiešais izsaukums neizdevās (${err.message}), izmantojam rezerves šablonu.`);
+      console.warn(`[Step 8] Gemini 4 Argon direct call failed (${err.message}), using fallback template.`);
     }
   }
 
@@ -139,31 +139,31 @@ export async function executeFraudEvaluation(args: Record<string, unknown>): Pro
 }
 
 async function runRemoteGatewayVerification() {
-  console.log("=== SOLIS 6, 7 UN 8: REMOTE HTTP/SSE, OAUTH 2.1 UN ANTIGRAVITY RĪKU PLŪSMAS VERIFIKĀCIJA ===\n");
+  console.log("=== STEPS 6, 7 & 8: REMOTE HTTP/SSE, OAUTH 2.1 & TOOL EXECUTION PIPELINE VERIFICATION ===\n");
 
   // -------------------------------------------------------------------------
-  // 1. SOLIS 8.1: Ģenerējam rīku ar Gemini 4 Argon un izlaižam caur Self-Healing Pipeline
+  // 1. STEP 8.1: Generate tool with Gemini 4 Argon and run through Self-Healing Pipeline
   // -------------------------------------------------------------------------
-  console.log("1. Ģenerējam sarežģītu FinTech MCP rīku ar Gemini 4 Argon...");
+  console.log("1. Generating complex FinTech MCP tool with Gemini 4 Argon...");
   const rawGeneratedTs = await generateComplexToolWithArgon(COMPLEX_FINTECH_SPEC);
 
-  console.log("2. Verificējam un pašārstējam ģenerēto TypeScript kodu (Solis 1-5 Pipeline)...");
+  console.log("2. Verifying and self-healing generated TypeScript code (Steps 1-5 Pipeline)...");
   const healingResult = await runSelfHealingPipeline({
     initialCode: rawGeneratedTs,
     maxIterations: 2
   });
 
   console.log(
-    `   Pašārstēšanās rezultāts: success=${healingResult.success}, iterācijas=${healingResult.totalIterations}, vēsture=${JSON.stringify(healingResult.history)}`
+    `   Self-healing result: success=${healingResult.success}, iterations=${healingResult.totalIterations}, history=${JSON.stringify(healingResult.history)}`
   );
 
   if (!healingResult.success) {
     throw new Error(
-      `Ģenerētā rīka pašārstēšanās neizdevās: ${JSON.stringify(healingResult.errorReport)}`
+      `Self-healing for generated tool failed: ${JSON.stringify(healingResult.errorReport)}`
     );
   }
 
-  // Definējam manifestu un verificējam ar SchemaGuard
+  // Define manifest and verify with SchemaGuard
   const toolManifest = {
     name: "evaluate_fraud_transaction",
     description:
@@ -214,12 +214,12 @@ async function runRemoteGatewayVerification() {
 
   const manifestValidation = validateToolManifest(toolManifest);
   if (!manifestValidation.success) {
-    throw new Error(`Manifesta shēma nav derīga: ${manifestValidation.errors?.join(", ")}`);
+    throw new Error(`Manifest schema is invalid: ${manifestValidation.errors?.join(", ")}`);
   }
-  console.log("   SchemaGuard verifikācija: { success: true }");
+  console.log("   SchemaGuard verification: { success: true }");
 
   // -------------------------------------------------------------------------
-  // 2. SOLIS 6 & 7: Palaižam Remote MCP SSE Vārteju ar OAuth 2.1 aizsargslāni
+  // 2. STEPS 6 & 7: Start Remote MCP SSE Gateway with OAuth 2.1 Security Layer
   // -------------------------------------------------------------------------
   const app = express();
   app.use(express.json());
@@ -232,7 +232,7 @@ async function runRemoteGatewayVerification() {
   const securityGuard = new OAuth2SecurityGuard({ issuerUrl: baseUrl });
   const gateway = new RemoteMcpSseGateway({ keepAliveIntervalMs: 5000 });
 
-  // Reģistrējam verificēto rīku konkrētam nomniekam (tenant_fintech_prod)
+  // Register verified tool for specific tenant (tenant_fintech_prod)
   gateway.registerDynamicTool({
     ...toolManifest,
     tenantId: "tenant_fintech_prod",
@@ -270,22 +270,22 @@ async function runRemoteGatewayVerification() {
   gateway.mountRoutes(app, securityGuard);
 
   try {
-    console.log(`\n3. Remote MCP Vārteja palaista: ${baseUrl}`);
+    console.log(`\n3. Remote MCP Gateway running: ${baseUrl}`);
 
-    // 3.1. Pārbaudām neautorizēta pieprasījuma noraidīšanu (RFC 9728 WWW-Authenticate)
+    // 3.1. Verify rejection of unauthorized request (RFC 9728 WWW-Authenticate)
     const unauthRes = await fetch(`${baseUrl}/mcp/sse`);
     const wwwAuth = unauthRes.headers.get("www-authenticate") || "";
-    console.log(`   Neautorizēts GET /mcp/sse statuss: ${unauthRes.status} (WWW-Authenticate: ${wwwAuth})`);
+    console.log(`   Unauthorized GET /mcp/sse status: ${unauthRes.status} (WWW-Authenticate: ${wwwAuth})`);
     if (unauthRes.status !== 401 || !wwwAuth.includes("resource_metadata=")) {
-      throw new Error("Solis 7 neizdevās: Gaidīts 401 ar RFC 9728 resource_metadata galveni!");
+      throw new Error("Step 7 failed: Expected 401 with RFC 9728 resource_metadata header!");
     }
 
-    // 3.2. Pārbaudām RFC 9728 Protected Resource Metadata galapunktu
+    // 3.2. Verify RFC 9728 Protected Resource Metadata endpoint
     const metaRes = await fetch(`${baseUrl}/.well-known/oauth-protected-resource`);
     const metadata = (await metaRes.json()) as Record<string, any>;
     console.log("   RFC 9728 Metadata:", JSON.stringify(metadata));
     if (!metadata.dcr_supported || !metadata.pkce_code_challenge_methods_supported?.includes("S256")) {
-      throw new Error("Solis 7 neizdevās: Nepilnīgi RFC 9728 metadati!");
+      throw new Error("Step 7 failed: Incomplete RFC 9728 metadata!");
     }
 
     // 3.3. Dynamic Client Registration (DCR - POST /oauth/register)
@@ -303,9 +303,9 @@ async function runRemoteGatewayVerification() {
       client_secret: string;
       tenant_id: string;
     };
-    console.log(`   DCR Klients reģistrēts: client_id=${dcrClient.client_id}, tenant=${dcrClient.tenant_id}`);
+    console.log(`   DCR Client registered: client_id=${dcrClient.client_id}, tenant=${dcrClient.tenant_id}`);
 
-    // 3.4. OAuth 2.1 PKCE S256 plūsmas pārbaude
+    // 3.4. OAuth 2.1 PKCE S256 flow verification
     const codeVerifier = crypto.randomBytes(32).toString("base64url");
     const codeChallenge = crypto.createHash("sha256").update(codeVerifier, "ascii").digest("base64url");
     const authCode = securityGuard.createPkceAuthorizationCode({
@@ -325,20 +325,20 @@ async function runRemoteGatewayVerification() {
     });
     const tokenData = (await tokenRes.json()) as { access_token: string; scope: string };
     if (!tokenData.access_token) {
-      throw new Error("Solis 7 neizdevās: PKCE S256 tokena apmaiņa neizdevās!");
+      throw new Error("Step 7 failed: PKCE S256 token exchange failed!");
     }
-    console.log("   OAuth 2.1 PKCE S256 Bearer JWT veiksmīgi izsniegts.");
+    console.log("   OAuth 2.1 PKCE S256 Bearer JWT issued successfully.");
 
-    // 3.5. Izveidojam Scoped API Key citam nomniekam (tenant_intruder), lai pārbaudītu izolāciju
+    // 3.5. Create Scoped API Key for another tenant (tenant_intruder) to verify isolation
     const intruderKey = securityGuard.createScopedApiKey({
       tenantId: "tenant_intruder",
       scopes: ["mcp:connect", "mcp:tools"]
     });
 
     // -------------------------------------------------------------------------
-    // 3. SOLIS 6 & 8.2: Savienojam Antigravity MCP Klientu caur Remote SSE transportu
+    // 3. STEPS 6 & 8.2: Connect Antigravity MCP Client via Remote SSE transport
     // -------------------------------------------------------------------------
-    console.log("\n4. Savienojam MCP Klientu caur Remote HTTP/SSE ar OAuth 2.1 Bearer JWT...");
+    console.log("\n4. Connecting MCP Client via Remote HTTP/SSE with OAuth 2.1 Bearer JWT...");
 
     const authedFetch: typeof fetch = async (input, init) => {
       const headers = new Headers(init?.headers);
@@ -361,23 +361,23 @@ async function runRemoteGatewayVerification() {
     );
 
     await mcpClient.connect(sseTransport);
-    console.log("   MCP Klients veiksmīgi savienots caur SSE!");
+    console.log("   MCP Client connected successfully via SSE!");
 
-    // Pārbaudām aktīvās sesijas un multitenancy izolāciju
+    // Verify active sessions and multitenancy isolation
     const sessionsRes = await authedFetch(`${baseUrl}/mcp/sessions`);
     const sessionsInfo = (await sessionsRes.json()) as {
       activeSessionsCount: number;
       sessions: Array<{ sessionId: string; tenantId: string }>;
     };
-    console.log("   Aktīvās SSE sesijas:", JSON.stringify(sessionsInfo));
+    console.log("   Active SSE sessions:", JSON.stringify(sessionsInfo));
 
     if (sessionsInfo.activeSessionsCount !== 1) {
-      throw new Error("Solis 6 neizdevās: Aktīvo SSE sesiju skaitam jābūt 1!");
+      throw new Error("Step 6 failed: Active SSE sessions count must be 1!");
     }
 
     const activeSessionId = sessionsInfo.sessions[0].sessionId;
 
-    // Pārbaudām, vai svešs nomnieks (tenant_intruder) ar derīgu API atslēgu tiek bloķēts no svešas sesijas
+    // Verify foreign tenant (tenant_intruder) with valid API key is blocked from session
     const hijackAttempt = await fetch(`${baseUrl}/mcp/messages?sessionId=${activeSessionId}`, {
       method: "POST",
       headers: {
@@ -386,22 +386,22 @@ async function runRemoteGatewayVerification() {
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: 99, method: "tools/list" })
     });
-    console.log(`   Sveša nomnieka (tenant_intruder) sesijas pārtveršanas mēģinājuma statuss: ${hijackAttempt.status}`);
+    console.log(`   Foreign tenant (tenant_intruder) session hijack attempt status: ${hijackAttempt.status}`);
     if (hijackAttempt.status !== 403) {
-      throw new Error("Solis 7 neizdevās: Sveša nomnieka piekļuvei pie citas SSE sesijas jāatgriež 403 Forbidden!");
+      throw new Error("Step 7 failed: Foreign tenant access to another SSE session must return 403 Forbidden!");
     }
 
-    // Izsaucam tools/list caur SSE
+    // Call tools/list via SSE
     const toolsList = await mcpClient.listTools();
     const toolNames = toolsList.tools.map(t => t.name);
-    console.log("   Pieejamie MCP rīki sesijā:", toolNames);
+    console.log("   Available MCP tools in session:", toolNames);
 
     if (!toolNames.includes("evaluate_fraud_transaction") || !toolNames.includes("generate_mcp_server")) {
-      throw new Error("Solis 8 neizdevās: Sarakstā trūkst 'evaluate_fraud_transaction' vai 'generate_mcp_server'!");
+      throw new Error("Step 8 failed: Missing 'evaluate_fraud_transaction' or 'generate_mcp_server' in list!");
     }
 
-    // Izsaucam ģenerēto FinTech rīku ar dziļi ligzdotu peiloudu caur SSE
-    console.log("\n5. Izpildām 'evaluate_fraud_transaction' rīka izsaukumu caur Remote SSE...");
+    // Call generated FinTech tool with deeply nested payload via SSE
+    console.log("\n5. Executing 'evaluate_fraud_transaction' tool call via Remote SSE...");
     const callResult = await mcpClient.callTool({
       name: "evaluate_fraud_transaction",
       arguments: {
@@ -420,7 +420,7 @@ async function runRemoteGatewayVerification() {
       }
     });
 
-    console.log("   Rīka izpildes atbilde (CallToolResult):", JSON.stringify(callResult, null, 2));
+    console.log("   Tool execution response (CallToolResult):", JSON.stringify(callResult, null, 2));
 
     const firstContent = (callResult.content as Array<{ type: string; text: string }>)[0];
     const parsedPayload = JSON.parse(firstContent.text);
@@ -431,11 +431,11 @@ async function runRemoteGatewayVerification() {
       parsedPayload.evaluatedByTenant !== "tenant_fintech_prod" ||
       parsedPayload.customerCountry !== "LV"
     ) {
-      throw new Error("Solis 8 neizdevās: Rīka atgrieztais peilouds neatbilst gaidītajam rezultātam!");
+      throw new Error("Step 8 failed: Tool returned payload does not match expected result!");
     }
 
     await mcpClient.close();
-    console.log("\nVisi 6., 7. un 8. soļa (Remote HTTP/SSE, OAuth 2.1 DCR/PKCE, Scoped Keys un Gemini 4 Argon rīka izpildes) testi sekmīgi izturēti!");
+    console.log("\nAll Steps 6, 7 & 8 (Remote HTTP/SSE, OAuth 2.1 DCR/PKCE, Scoped Keys & Gemini 4 Argon execution) tests passed successfully!");
   } finally {
     await gateway.closeAllSessions();
     serverInstance.close();
@@ -443,6 +443,6 @@ async function runRemoteGatewayVerification() {
 }
 
 runRemoteGatewayVerification().catch(err => {
-  console.error("Testa kļūda:", err);
+  console.error("Test error:", err);
   process.exit(1);
 });

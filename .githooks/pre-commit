@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -e
 
-echo -e "\n\033[38;2;16,185,129m[MCPX HOOK]\033[0m Pārbauda sagatavotos TypeScript failus pirms komita..."
+echo -e "\n\033[38;2;16,185,129m[MCPX HOOK]\033[0m Checking staged TypeScript files prior to commit..."
 
-# Atlasa visus staged failus ar paplašinājumu .ts vai .tsx (izņemot dzēstos)
+# Select all staged files with .ts or .tsx extension (excluding deleted files)
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' | grep -v -E '(test\.ts|\.d\.ts|node_modules/|scripts/)' || true)
 
 if [ -z "$STAGED_FILES" ]; then
-  echo -e "\033[90mNav izmainītu TypeScript koda failu pārbaudei. Turpina komitu.\033[0m\n"
+  echo -e "\033[90mNo staged TypeScript files found for inspection. Proceeding with commit.\033[0m\n"
   exit 0
 fi
 
@@ -15,19 +15,19 @@ FAILED=0
 
 for FILE in $STAGED_FILES; do
   if [ -f "$FILE" ]; then
-    echo -e "\n\033[34m→ Auditē:\033[0m $FILE"
+    echo -e "\n\033[34m→ Auditing:\033[0m $FILE"
     if ! npm run check -- "$FILE"; then
-      echo -e "\033[31m✖ mcpx audits noraidīja failu:\033[0m $FILE"
+      echo -e "\033[31m✖ mcpx audit rejected file:\033[0m $FILE"
       FAILED=1
     fi
   fi
 done
 
 if [ $FAILED -ne 0 ]; then
-  echo -e "\n\033[31m[BLOĶĒTS]\033[0m Komits apturēts, jo mcpx vārteja atklāja drošības vai sintakses neatbilstības."
-  echo -e "Izlabo kļūdas vai nepieciešamības gadījumā palaid ar 'git commit --no-verify'.\n"
+  echo -e "\n\033[31m[BLOCKED]\033[0m Commit aborted due to security or syntax violations detected by mcpx gateway."
+  echo -e "Resolve the errors or, if strictly necessary, commit with 'git commit --no-verify'.\n"
   exit 1
 fi
 
-echo -e "\n\033[32m✔ Visi sagatavotie faili ir sekmīgi verificēti mcpx malas vārtejā.\033[0m Turpina komitu...\n"
+echo -e "\n\033[32m✔ All staged files successfully verified against mcpx edge gateway.\033[0m Proceeding with commit...\n"
 exit 0

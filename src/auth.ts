@@ -2,13 +2,13 @@ export type BillingMode = "prepaid" | "postpaid" | "unlimited";
 
 export interface BillingDetails {
   mode: BillingMode;
-  balanceCents: number;             // Vesels skaitlis (USD centi), novēršot peldošā punkta kļūdas
+  balanceCents: number;             // Integer (USD cents), eliminating floating-point errors
   currency: "USD" | "EUR";
-  costPerToolCallCents: number;     // Bāzes cena standarta rīkam (noklusētā: 1 cents = $0.01)
-  costPerGenerateCents: number;     // Cena koda ģenerēšanai (noklusētā: 5 centi = $0.05)
-  totalSpentCents: number;          // Vēsturiskais kopējais patēriņš
-  lastTopupAt?: string;             // ISO 8601 laika zīmogs
-  lowBalanceThresholdCents: number; // Slieksnis brīdinājuma galvenei (noklusētais: 10 centi = $0.10)
+  costPerToolCallCents: number;     // Base price per standard tool call (default: 1 cent = $0.01)
+  costPerGenerateCents: number;     // Price per code generation (default: 5 cents = $0.05)
+  totalSpentCents: number;          // Historical total spend in cents
+  lastTopupAt?: string;             // ISO 8601 timestamp
+  lowBalanceThresholdCents: number; // Threshold for low-balance warning header (default: 10 cents = $0.10)
 }
 
 export interface ProvisionKeyPayload {
@@ -163,7 +163,7 @@ export function recordTelemetry(
           ],
         });
       } catch (err) {
-        // Telemetrijas kļūdas nedrīkst pārtraukt pamata izpildi
+        // Telemetry errors must not abort primary execution flow
         console.error("Telemetry write failed:", err);
       }
     })()
@@ -201,8 +201,8 @@ export async function computeKeyId(apiKey: string): Promise<string> {
 }
 
 /**
- * Konstanta laika virkņu salīdzināšana ar SHA-256 hešēšanu Web Crypto līmenī.
- * Novērš laika mērīšanas uzbrukumus (timing attacks) un garuma noplūdi (length leak).
+ * Constant-time string comparison using SHA-256 hashing via Web Crypto.
+ * Prevents timing attacks and length-leakage side-channels.
  */
 export async function timingSafeStringEqual(a: string, b: string): Promise<boolean> {
   const encoder = new TextEncoder();
@@ -218,8 +218,8 @@ export async function timingSafeStringEqual(a: string, b: string): Promise<boole
 }
 
 /**
- * Stingra administratora autorizācijas pārbaude maršrutiem /keys, /keys/provision, /keys/:keyId.
- * Pieprasa Authorization: Bearer <MCPX_MASTER_KEY> vai X-Master-Key galveni.
+ * Strict administrator authorization check for routes /keys, /keys/provision, /keys/:keyId.
+ * Requires Authorization: Bearer <MCPX_MASTER_KEY> or X-Master-Key header.
  */
 export async function validateMasterAuth(
   request: Request,
@@ -239,7 +239,7 @@ export async function validateMasterAuth(
     };
   }
 
-  // 1. Iegūstam marķieri no Authorization: Bearer vai X-Master-Key galvenes
+  // 1. Extract token from Authorization: Bearer or X-Master-Key header
   const authHeader = request.headers.get("Authorization");
   const xMasterKey = request.headers.get("X-Master-Key")?.trim();
 
@@ -269,13 +269,13 @@ export async function validateMasterAuth(
     };
   }
 
-  // 2. Konstanta laika salīdzināšana ar Master Secret
+  // 2. Constant-time comparison against Master Secret
   const isMaster = await timingSafeStringEqual(token, masterSecret);
   if (isMaster) {
     return { authorized: true };
   }
 
-  // Papildu pārbaude ar otru atslēgu, ja definētas abas
+  // Additional check with secondary master key if both are defined
   if (env.MCPX_MASTER_KEY && env.MCPX_API_KEY && env.MCPX_MASTER_KEY !== env.MCPX_API_KEY) {
     const isAltMaster = await timingSafeStringEqual(token, env.MCPX_API_KEY);
     if (isAltMaster) {
@@ -283,7 +283,7 @@ export async function validateMasterAuth(
     }
   }
 
-  // 3. Pārbaude: vai tā ir nomnieka API atslēga no KV krātuves?
+  // 3. Check: Is this a tenant API key from KV storage?
   if (env.MCPX_KEYS) {
     try {
       const rawRecord = await env.MCPX_KEYS.get(`key:${token}`, "text");
@@ -311,7 +311,7 @@ export async function validateMasterAuth(
           }
 
           if (record.status === "active") {
-            // Nomnieks ir autentificēts, bet tam NAV administratora tiesību -> 403 Forbidden
+            // Tenant is authenticated, but lacks administrator privileges -> 403 Forbidden
             return {
               authorized: false,
               response: new Response(
@@ -332,11 +332,11 @@ export async function validateMasterAuth(
         }
       }
     } catch {
-      // Ja JSON nav derīgs, ignorējam un turpinām uz 401
+      // If JSON is malformed, ignore and fall through to 401
     }
   }
 
-  // 4. Marķieris nav atpazīts nedz kā master, nedz kā nomnieks -> 401 Unauthorized
+  // 4. Token recognized neither as master nor tenant -> 401 Unauthorized
   return {
     authorized: false,
     response: new Response(
@@ -392,7 +392,7 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
 
   const token = authHeader.slice(7).trim();
 
-  // 1. Ārkārtas master/admin atslēgas pārbaude ar timing-safe salīdzināšanu
+  // 1. Emergency master/admin key validation with constant-time comparison
   if (masterSecret) {
     const isMaster = await timingSafeStringEqual(token, masterSecret);
     if (isMaster) {
@@ -446,7 +446,7 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
     }
   }
 
-  // 2. Daudzlietotāju KV krātuves pārbaude ar formātu `key:<token>`
+  // 2. Multi-tenant KV storage verification with key format `key:<token>`
   if (env.MCPX_KEYS) {
     try {
       const rawRecord = await env.MCPX_KEYS.get(`key:${token}`, "text");
@@ -454,7 +454,7 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
         const cleaned = rawRecord.replace(/^\uFEFF/, "").trim();
         const record = JSON.parse(cleaned) as ApiKeyRecord;
         if (record) {
-          // Pārbauda, vai atslēga ir anulēta (revoked)
+          // Check if key is revoked
           if (record.status === "revoked") {
             return {
               authorized: false,
@@ -475,7 +475,7 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
           }
 
           if (record.status === "active") {
-            // Pārbauda derīguma termiņu, ja norādīts
+            // Check expiration timestamp if configured
             if (record.expiresAt) {
               const expTime = new Date(record.expiresAt).getTime();
               if (!isNaN(expTime) && Date.now() > expTime) {
@@ -526,7 +526,7 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
         }
       }
     } catch {
-      // Ja JSON formāts KV ierakstā nav derīgs, apstrādā kā nederīgu atslēgu
+      // If JSON record in KV is invalid, treat as unauthenticated
     }
   }
 

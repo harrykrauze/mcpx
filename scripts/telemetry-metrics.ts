@@ -1,12 +1,12 @@
 /**
  * scripts/telemetry-metrics.ts
  * 
- * mcpx KV dienas audita (stats:daily:*) un Cloudflare Analytics Engine (mcpx_telemetry)
- * integrētais telemetrijas un finanšu metrikas analīzes rīks.
+ * mcpx KV daily audit (stats:daily:*) and Cloudflare Analytics Engine (mcpx_telemetry)
+ * integrated telemetry and financial metrics analysis tool.
  * 
- * Izsaukums:
+ * Usage:
  *   npm run metrics
- *   vai:
+ *   or:
  *   npx tsx scripts/telemetry-metrics.ts [--account <id>] [--token <token>] [--namespace <id>]
  */
 
@@ -17,7 +17,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// ANSI krāsu kodi terminālim
+// ANSI color codes for terminal
 const C = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
@@ -87,19 +87,19 @@ function parseArgs(args: string[]): CliArgs {
 
 function printHelp(): void {
   console.log(`
-${C.bold}mcpx KV Dienas Audita & Telemetrijas Metrikas Rīks${C.reset}
+${C.bold}mcpx KV Daily Audit & Telemetry Metrics Tool${C.reset}
 ======================================================
 
-Lietošana:
+Usage:
   npm run metrics
-  vai:
-  npx tsx scripts/telemetry-metrics.ts [OPCIJAS]
+  or:
+  npx tsx scripts/telemetry-metrics.ts [OPTIONS]
 
-Opcijas:
-  --account, -a <id>      Cloudflare konta ID (noklusējums: no vides vai wrangler sesijas)
-  --token, -t <token>     Cloudflare API tokens (ar KV un Analytics Engine lasīšanas tiesībām)
-  --namespace, -n <id>    KV MCPX_KEYS namespace ID (noklusējums: 10a9a338595d40a5b424d3be11e26860)
-  --help, -h              Parādīt šo palīdzības paziņojumu
+Options:
+  --account, -a <id>      Cloudflare Account ID (default: from env or wrangler session)
+  --token, -t <token>     Cloudflare API token (with KV and Analytics Engine read permissions)
+  --namespace, -n <id>    KV MCPX_KEYS namespace ID (default: 10a9a338595d40a5b424d3be11e26860)
+  --help, -h              Display this help message
 `);
 }
 
@@ -115,7 +115,7 @@ async function resolveCredentials(args: CliArgs): Promise<{
     process.env.CLOUDFLARE_KV_NAMESPACE_ID ||
     "10a9a338595d40a5b424d3be11e26860";
 
-  // 1. Pārbauda .dev.vars failu, ja kāds mainīgais trūkst
+  // 1. Check .dev.vars file if any variable is missing
   if ((!accountId || !apiToken) && fs.existsSync(".dev.vars")) {
     try {
       const devVars = fs.readFileSync(".dev.vars", "utf8");
@@ -126,11 +126,11 @@ async function resolveCredentials(args: CliArgs): Promise<{
       if (!apiToken && tokMatch) apiToken = tokMatch[1].trim();
       if (args.namespaceId === undefined && nsMatch) namespaceId = nsMatch[1].trim();
     } catch {
-      // Ignorē lasīšanas kļūdu
+      // Ignore read error
     }
   }
 
-  // 2. Mēģina nolasīt no lokālās Wrangler konfigurācijas (default.toml)
+  // 2. Attempt reading from local Wrangler configuration (default.toml)
   if (!accountId || !apiToken) {
     try {
       const tomlPath = path.join(
@@ -151,27 +151,27 @@ async function resolveCredentials(args: CliArgs): Promise<{
           }
 
           if (!accountId) {
-            // Noklusētais mcpx Cloudflare Account ID
+            // Default mcpx Cloudflare Account ID
             accountId = "8d6dc8b97f645453c0aa7f3fac62535d";
           }
         }
       }
     } catch {
-      // Ignorē lasīšanas kļūdu
+      // Ignore read error
     }
   }
 
-  // 3. Fallback uz zināmo mcpx konta ID, ja pieejams tokens
+  // 3. Fallback to known mcpx account ID if token is available
   if (!accountId && apiToken) {
     accountId = "8d6dc8b97f645453c0aa7f3fac62535d";
   }
 
   if (!accountId || !apiToken) {
     console.error(`
-${C.red}${C.bold}[KĻŪDA: Trūkst Cloudflare akreditācijas datu]${C.reset}
-Nepieciešams norādīt CLOUDFLARE_ACCOUNT_ID un CLOUDFLARE_API_TOKEN:
-  1. Failā .env vai .dev.vars
-  2. Vai kā CLI parametrus: npm run metrics -- --account <id> --token <token>
+${C.red}${C.bold}[ERROR: Missing Cloudflare credentials]${C.reset}
+CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN must be specified:
+  1. In .env or .dev.vars file
+  2. Or via CLI arguments: npm run metrics -- --account <id> --token <token>
 `);
     process.exit(1);
   }
@@ -191,7 +191,7 @@ async function fetchLatestDailyAudit(
     });
 
     if (!res.ok) {
-      console.warn(`${C.yellow}[Brīdinājums] Neizdevās nolasīt KV atslēgu sarakstu (HTTP ${res.status})${C.reset}`);
+      console.warn(`${C.yellow}[Warning] Failed to list KV keys (HTTP ${res.status})${C.reset}`);
       return { summary: null, keyName: null, isToday: false };
     }
 
@@ -200,7 +200,7 @@ async function fetchLatestDailyAudit(
       return { summary: null, keyName: null, isToday: false };
     }
 
-    // Sašķiro atslēgas dilstošā secībā pēc nosaukuma (datuma)
+    // Sort keys descending by name (date)
     const sortedKeys = json.result
       .map((item: any) => item.name as string)
       .sort()
@@ -216,7 +216,7 @@ async function fetchLatestDailyAudit(
     });
 
     if (!valRes.ok) {
-      console.warn(`${C.yellow}[Brīdinājums] Neizdevās iegūt vērtību atslēgai ${latestKey} (HTTP ${valRes.status})${C.reset}`);
+      console.warn(`${C.yellow}[Warning] Failed to retrieve value for key ${latestKey} (HTTP ${valRes.status})${C.reset}`);
       return { summary: null, keyName: latestKey, isToday };
     }
 
@@ -226,7 +226,7 @@ async function fetchLatestDailyAudit(
 
     return { summary, keyName: latestKey, isToday };
   } catch (err: any) {
-    console.warn(`${C.yellow}[Brīdinājums] KV ikdienas audita nolasīšanas kļūda: ${err.message}${C.reset}`);
+    console.warn(`${C.yellow}[Warning] Error reading KV daily audit: ${err.message}${C.reset}`);
     return { summary: null, keyName: null, isToday: false };
   }
 }
@@ -256,9 +256,9 @@ async function executeSql(
         parsedMessage = parsed.errors.map((e: any) => e.message || JSON.stringify(e)).join("; ");
       }
     } catch {
-      // Ignorē
+      // Ignore
     }
-    throw new Error(`Analytics Engine SQL API kļūda (HTTP ${res.status}): ${parsedMessage}`);
+    throw new Error(`Analytics Engine SQL API error (HTTP ${res.status}): ${parsedMessage}`);
   }
 
   const json = (await res.json()) as any;
@@ -267,7 +267,7 @@ async function executeSql(
 
 function renderTable(headers: string[], rows: string[][]): void {
   if (rows.length === 0) {
-    console.log(`${C.dim}  (Nav datu)${C.reset}`);
+    console.log(`${C.dim}  (No data)${C.reset}`);
     return;
   }
 
@@ -326,17 +326,17 @@ async function main(): Promise<void> {
 
   console.log(`
 ${C.cyan}${C.bold}================================================================${C.reset}
-${C.white}${C.bold}  MCPX KV DIENAS AUDITS & ANALYTICS ENGINE TELEMETRIJA          ${C.reset}
-  Konta ID:      ${C.dim}${accountId}${C.reset}
+${C.white}${C.bold}  MCPX KV DAILY AUDIT & ANALYTICS ENGINE TELEMETRY              ${C.reset}
+  Account ID:    ${C.dim}${accountId}${C.reset}
   KV Namespace:  ${C.dim}${namespaceId}${C.reset}
-  Atskaites laiks: ${C.dim}${nowIso}${C.reset}
+  Report Time:   ${C.dim}${nowIso}${C.reset}
 ${C.cyan}${C.bold}================================================================${C.reset}
 `);
 
   // =========================================================================
-  // [1] SISTĒMAS VESELĪBA & KV DIENAS AUDITS
+  // [1] SYSTEM HEALTH & KV DAILY AUDIT
   // =========================================================================
-  console.log(`${C.bold}[1] SISTĒMAS VESELĪBA & KV DIENAS AUDITS${C.reset}`);
+  console.log(`${C.bold}[1] SYSTEM HEALTH & KV DAILY AUDIT${C.reset}`);
   console.log(`${C.dim}────────────────────────────────────────────────────────────────${C.reset}`);
 
   const { summary, keyName, isToday } = await fetchLatestDailyAudit(
@@ -347,30 +347,30 @@ ${C.cyan}${C.bold}==============================================================
 
   if (!summary) {
     console.log(
-      `  ${C.yellow}⚠ KV ieraksts 'stats:daily:*' vēl nav atrasts.${C.reset}`
+      `  ${C.yellow}⚠ KV entry 'stats:daily:*' not yet found.${C.reset}`
     );
     console.log(
-      `    ${C.dim}(Cron grafiks '0 8 * * *' izveidos ierakstu nākamajā ciklā plkst. 08:00 UTC)${C.reset}`
+      `    ${C.dim}(Cron schedule '0 8 * * *' will record audit on next cycle at 08:00 UTC)${C.reset}`
     );
   } else {
     const statusColor = summary.status === "HEALTHY" ? C.brightGreen : C.brightRed;
     const dateLabel = isToday
-      ? `${summary.date} ${C.brightGreen}(šodien)${C.reset}`
-      : `${summary.date} ${C.yellow}(pēdējais pieejamais)${C.reset}`;
+      ? `${summary.date} ${C.brightGreen}(today)${C.reset}`
+      : `${summary.date} ${C.yellow}(latest available)${C.reset}`;
 
-    console.log(`  * Sistēmas statuss:       ${statusColor}${C.bold}● ${summary.status}${C.reset}`);
-    console.log(`  * Audita datums:          ${dateLabel}`);
-    console.log(`  * Pēdējais laika zīmogs:  ${C.dim}${summary.timestamp}${C.reset}`);
-    console.log(`  * Aktīvās API atslēgas:   ${C.bold}${summary.totalActiveKeys}${C.reset}`);
+    console.log(`  * System Status:          ${statusColor}${C.bold}● ${summary.status}${C.reset}`);
+    console.log(`  * Audit Date:             ${dateLabel}`);
+    console.log(`  * Latest Timestamp:       ${C.dim}${summary.timestamp}${C.reset}`);
+    console.log(`  * Active API Keys:        ${C.bold}${summary.totalActiveKeys}${C.reset}`);
     console.log(
-      `  * Zemas bilances atslēgas: ${
+      `  * Low-Balance Keys:       ${
         summary.lowBalanceCount > 0 ? C.brightYellow : C.green
       }${C.bold}${summary.lowBalanceCount}${C.reset} (< $1.00 / 100¢)`
     );
 
     if (summary.lowBalanceKeys && summary.lowBalanceKeys.length > 0) {
-      console.log(`\n  ${C.yellow}${C.bold}Klienti ar zemu bilanci:${C.reset}`);
-      const headers = ["Tenant ID", "Key ID", "Bilance (Centi)", "Bilance (USD)"];
+      console.log(`\n  ${C.yellow}${C.bold}Clients with low balance:${C.reset}`);
+      const headers = ["Tenant ID", "Key ID", "Balance (Cents)", "Balance (USD)"];
       const rows = summary.lowBalanceKeys.map((k) => [
         k.tenantId,
         k.keyId,
@@ -380,7 +380,7 @@ ${C.cyan}${C.bold}==============================================================
       renderTable(headers, rows);
     } else {
       console.log(
-        `  ${C.green}✓ Visiem aktīvajiem klientiem pietiekama bilance (>= $1.00 / 100¢).${C.reset}`
+        `  ${C.green}✓ All active clients have sufficient balance (>= $1.00 / 100¢).${C.reset}`
       );
     }
   }
@@ -388,9 +388,9 @@ ${C.cyan}${C.bold}==============================================================
   console.log();
 
   // =========================================================================
-  // [2] MONETIZĀCIJA & CREEM IEŅĒMUMI (30d)
+  // [2] MONETIZATION & CREEM REVENUE (30d)
   // =========================================================================
-  console.log(`${C.bold}[2] MONETIZĀCIJA & CREEM IEŅĒMUMI (30d)${C.reset}`);
+  console.log(`${C.bold}[2] MONETIZATION & CREEM REVENUE (30d)${C.reset}`);
   console.log(`${C.dim}────────────────────────────────────────────────────────────────${C.reset}`);
 
   try {
@@ -402,9 +402,9 @@ GROUP BY currency;`;
     const creemRows = await executeSql(accountId, apiToken, creemSql);
 
     if (creemRows.length === 0) {
-      console.log(`  ${C.dim}(Pēdējās 30 dienās nav reģistrētu Creem papildināšanas pasūtījumu)${C.reset}`);
+      console.log(`  ${C.dim}(No Creem top-up orders recorded in the last 30 days)${C.reset}`);
     } else {
-      const headers = ["Valūta", "Pasūtījumi", "Kopējie Ieņēmumi (USD)", "Vidējais Pasūtījums (USD)"];
+      const headers = ["Currency", "Orders", "Total Revenue (USD)", "Avg Order (USD)"];
       let grandTotalUsd = 0;
       let totalOrders = 0;
 
@@ -427,23 +427,23 @@ GROUP BY currency;`;
 
       renderTable(headers, rows);
       console.log(
-        `  ${C.brightGreen}${C.bold}Kopējais Creem apgrozījums (30d): $${grandTotalUsd.toFixed(2)} USD${C.reset} across ${totalOrders} pasūtījumiem`
+        `  ${C.brightGreen}${C.bold}Total Creem Revenue (30d): $${grandTotalUsd.toFixed(2)} USD${C.reset} across ${totalOrders} orders`
       );
     }
   } catch (err: any) {
-    console.error(`  ${C.red}Kļūda vaicājot Creem telemetriju: ${err.message}${C.reset}`);
+    console.error(`  ${C.red}Error querying Creem telemetry: ${err.message}${C.reset}`);
   }
 
   console.log();
 
   // =========================================================================
-  // [3] X402 PATĒRIŅŠ PA RĪKIEM (30d)
+  // [3] X402 CONSUMPTION BY TOOL (30d)
   // =========================================================================
-  console.log(`${C.bold}[3] X402 PATĒRIŅŠ PA RĪKIEM (30d)${C.reset}`);
+  console.log(`${C.bold}[3] X402 CONSUMPTION BY TOOL (30d)${C.reset}`);
   console.log(`${C.dim}────────────────────────────────────────────────────────────────${C.reset}`);
 
   try {
-    // 1. Mēģina primāro vaicājumu (blob1 = 'mcp.tool_call')
+    // 1. Try primary query (blob1 = 'mcp.tool_call')
     const primarySql = `SELECT blob4 AS tool_name, COUNT() AS calls, SUM(double1) AS total_cents, SUM(double2) AS total_usd
 FROM mcpx_telemetry
 WHERE blob1 = 'mcp.tool_call' AND timestamp >= NOW() - INTERVAL '30' DAY
@@ -452,7 +452,7 @@ ORDER BY calls DESC;`;
 
     let toolData = await executeSql(accountId, apiToken, primarySql);
 
-    // 2. Ja atgriež 0 rindas, izpilda fallback vaicājumu (blob2 in tools/call / tools/execute)
+    // 2. If 0 rows returned, execute fallback query (blob2 in tools/call / tools/execute)
     if (toolData.length === 0) {
       const fallbackSql = `SELECT blob3 AS tool_name, COUNT() AS calls, SUM(double3) AS total_cents, SUM(double3) / 100.0 AS total_usd
 FROM mcpx_telemetry
@@ -464,9 +464,9 @@ ORDER BY calls DESC;`;
     }
 
     if (toolData.length === 0) {
-      console.log(`  ${C.dim}(Pēdējās 30 dienās nav rīku izsaukumu datu)${C.reset}`);
+      console.log(`  ${C.dim}(No tool call telemetry found in the last 30 days)${C.reset}`);
     } else {
-      const headers = ["Rīka Nosaukums (Tool)", "Izsaukumi", "Patēriņš (Centi)", "Patēriņš (USD)"];
+      const headers = ["Tool Name", "Calls", "Consumption (Cents)", "Consumption (USD)"];
       let totalCalls = 0;
       let totalCents = 0;
       let totalUsd = 0;
@@ -491,19 +491,19 @@ ORDER BY calls DESC;`;
 
       renderTable(headers, rows);
       console.log(
-        `  ${C.brightCyan}${C.bold}Kopējais x402 patēriņš (30d): ${totalCents}¢ ($${totalUsd.toFixed(2)} USD)${C.reset} no ${totalCalls} rīku izsaukumiem`
+        `  ${C.brightCyan}${C.bold}Total x402 Consumption (30d): ${totalCents}¢ ($${totalUsd.toFixed(2)} USD)${C.reset} from ${totalCalls} tool calls`
       );
     }
   } catch (err: any) {
-    console.error(`  ${C.red}Kļūda vaicājot x402 rīku telemetriju: ${err.message}${C.reset}`);
+    console.error(`  ${C.red}Error querying x402 tool telemetry: ${err.message}${C.reset}`);
   }
 
   console.log(`
-${C.green}[✓] Telemetrijas un audita pārskats veiksmīgi sagatavots.${C.reset}
+${C.green}[✓] Telemetry and audit report successfully generated.${C.reset}
 `);
 }
 
 main().catch((err) => {
-  console.error(`\n${C.red}${C.bold}[Fatāla Kļūda]${C.reset} ${err.message}`);
+  console.error(`\n${C.red}${C.bold}[Fatal Error]${C.reset} ${err.message}`);
   process.exit(1);
 });

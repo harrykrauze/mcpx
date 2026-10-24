@@ -1,11 +1,11 @@
 /**
  * scripts/test-domain-tools.ts
  * 
- * AHP GATE 3 (/test) Domēna Rīku Matemātiskā un Drošības Verifikācija:
- * 1. EN ISO 6946 Būvfizikas Kalkulatora etalona pārbaude (R_tot ≈ 4.581, U ≈ 0.218).
- * 2. Plūsmas virzienu (horizontal, upwards, downwards) un kondensācijas riska heuristika.
- * 3. Jev semantiskās AST koda analīzes pārbaude (Safe vs Rejected injekcijas).
- * 4. MCP JSON-RPC attālinātā integrācija: tools/list un tools/call pret serveri.
+ * AHP GATE 3 (/test) Domain Tools Mathematical & Security Verification:
+ * 1. EN ISO 6946 Building Physics Calculator benchmark verification (R_tot ≈ 4.581, U ≈ 0.218).
+ * 2. Heat flow directions (horizontal, upwards, downwards) and condensation risk heuristic.
+ * 3. Jev semantic AST code analysis verification (Safe vs Rejected injections).
+ * 4. MCP JSON-RPC remote integration: tools/list and tools/call against the gateway.
  */
 
 import dotenv from "dotenv";
@@ -41,92 +41,92 @@ async function step(
     results.push({ step: code, name, status: "PASS", details: details || undefined });
   } catch (err: any) {
     console.log("FAIL");
-    console.error(`       Kļūda: ${err.message || String(err)}`);
+    console.error(`       Error: ${err.message || String(err)}`);
     results.push({ step: code, name, status: "FAIL", error: err.message || String(err) });
   }
 }
 
 async function main() {
   console.log(`================================================================`);
-  console.log(`  AHP GATE 3: DOMĒNA RĪKU MATEMĀTISKĀ UN DROŠĪBAS VERIFIKĀCIJA   `);
-  console.log(`  Mērķa vārteja: ${BASE_URL}`);
-  console.log(`  Laika zīmogs: ${new Date().toISOString()}`);
+  console.log(`  AHP GATE 3: DOMAIN TOOLS MATHEMATICAL & SECURITY VERIFICATION `);
+  console.log(`  Target Gateway: ${BASE_URL}`);
+  console.log(`  Timestamp: ${new Date().toISOString()}`);
   console.log(`================================================================\n`);
 
-  // 1. Solis: EN ISO 6946 etalona pārbaude (Unit Level)
-  await step("U.1", "EN ISO 6946 Etalona aprēķins (Siena: Betons + Minerālvate + Apmetums)", async () => {
-    // Etalons:
-    // 200 mm dzelzsbetons (lambda = 2.0) -> R = 0.100 m²K/W
-    // 150 mm minerālvate (lambda = 0.035) -> R = 4.2857 m²K/W
-    // 20 mm ārējais apmetums (lambda = 0.80) -> R = 0.025 m²K/W
-    // Horizontāla plūsma: Rsi = 0.13, Rse = 0.04
+  // Step 1: EN ISO 6946 benchmark calculation (Unit Level)
+  await step("U.1", "EN ISO 6946 Benchmark calculation (Wall: Concrete + Mineral Wool + Plaster)", async () => {
+    // Benchmark:
+    // 200 mm reinforced concrete (lambda = 2.0) -> R = 0.100 m²K/W
+    // 150 mm mineral wool (lambda = 0.035) -> R = 4.2857 m²K/W
+    // 20 mm exterior plaster (lambda = 0.80) -> R = 0.025 m²K/W
+    // Horizontal heat flow: Rsi = 0.13, Rse = 0.04
     // R_tot = 0.13 + 0.100 + 4.2857 + 0.025 + 0.04 = 4.5807 ≈ 4.581 m²K/W
     // U = 1 / 4.5807 ≈ 0.21828 ≈ 0.218 W/(m²K)
     const result = calculateUValueIso6946({
       direction: "horizontal",
       layers: [
-        { name: "Dzelzsbetons", thickness_m: 0.2, lambda_w_mk: 2.0 },
-        { name: "Minerālvate", thickness_m: 0.15, lambda_w_mk: 0.035 },
-        { name: "Apmetums", thickness_m: 0.02, lambda_w_mk: 0.8 },
+        { name: "Reinforced Concrete", thickness_m: 0.2, lambda_w_mk: 2.0 },
+        { name: "Mineral Wool", thickness_m: 0.15, lambda_w_mk: 0.035 },
+        { name: "Plaster", thickness_m: 0.02, lambda_w_mk: 0.8 },
       ],
     });
 
     if (Math.abs(result.total_r_m2k_w - 4.581) > 0.01) {
-      throw new Error(`R_tot nesakrīt ar etalonu! Gaidīts ~4.581, iegūts ${result.total_r_m2k_w}`);
+      throw new Error(`R_tot does not match benchmark! Expected ~4.581, got ${result.total_r_m2k_w}`);
     }
 
     if (Math.abs(result.u_value_w_m2k - 0.218) > 0.005) {
-      throw new Error(`U-vērtība nesakrīt ar etalonu! Gaidīts ~0.218, iegūts ${result.u_value_w_m2k}`);
+      throw new Error(`U-value does not match benchmark! Expected ~0.218, got ${result.u_value_w_m2k}`);
     }
 
     if (result.condensation_risk_warning !== false) {
-      throw new Error(`Nepatiess kondensācijas brīdinājums pareizi nosiltinātai ārsienai!`);
+      throw new Error(`False positive condensation risk warning for properly insulated external wall!`);
     }
 
-    return `R_tot = ${result.total_r_m2k_w} m²K/W | U = ${result.u_value_w_m2k} W/(m²K) (Izolācijas īpatsvars: ${result.layer_resistances[1].percentage}%)`;
+    return `R_tot = ${result.total_r_m2k_w} m²K/W | U = ${result.u_value_w_m2k} W/(m²K) (Insulation share: ${result.layer_resistances[1].percentage}%)`;
   });
 
-  // 2. Solis: Virzienu un kondensācijas riska brīdinājuma pārbaude
-  await step("U.2", "EN ISO 6946 Virzienu un iekšējās siltināšanas kondensācijas brīdinājums", async () => {
-    // Pārbaude ar jumtu (upwards plūsma: Rsi = 0.10)
+  // Step 2: Flow directions and condensation risk warning
+  await step("U.2", "EN ISO 6946 Flow directions and internal insulation condensation warning", async () => {
+    // Verification on roof (upwards flow: Rsi = 0.10)
     const roof = calculateUValueIso6946({
       direction: "upwards",
-      layers: [{ name: "Jumta vate", thickness_m: 0.25, lambda_w_mk: 0.037 }],
+      layers: [{ name: "Roof Insulation", thickness_m: 0.25, lambda_w_mk: 0.037 }],
     });
 
     if (roof.rsi !== 0.1 || roof.rse !== 0.04) {
-      throw new Error(`Nepareizas virsmas pretestības jumtam: Rsi=${roof.rsi}, Rse=${roof.rse}`);
+      throw new Error(`Invalid surface resistances for roof: Rsi=${roof.rsi}, Rse=${roof.rse}`);
     }
 
-    // Pārbaude ar riskanto iekšējo siltināšanu (vata iekšpusē, betons ārpusē)
+    // Verification with risky internal insulation (insulation inside, concrete outside)
     const riskyWall = calculateUValueIso6946({
       direction: "horizontal",
       layers: [
-        { name: "Iekšējā minerālvate", thickness_m: 0.1, lambda_w_mk: 0.035 },
-        { name: "Masīva betona siena", thickness_m: 0.2, lambda_w_mk: 2.0 },
+        { name: "Internal Mineral Wool", thickness_m: 0.1, lambda_w_mk: 0.035 },
+        { name: "Solid Concrete Wall", thickness_m: 0.2, lambda_w_mk: 2.0 },
       ],
     });
 
     if (!riskyWall.condensation_risk_warning) {
-      throw new Error(`Kondensācijas riska brīdinājums netika aktivizēts bīstamai iekšējai siltināšanai!`);
+      throw new Error(`Condensation risk warning was not triggered for hazardous internal insulation!`);
     }
 
-    return `Jumta R_tot=${roof.total_r_m2k_w} | Iekšējās siltināšanas kondensāta brīdinājums veiksmīgi fiksēts`;
+    return `Roof R_tot=${roof.total_r_m2k_w} | Internal insulation condensation warning successfully captured`;
   });
 
-  // 3. Solis: Jev Semantiskā AST analīze (Unit Level)
-  await step("U.3", "Jev AST Koda Analīzes Drošības Pārbaude (Safe vs Attack Patterns)", async () => {
-    // A: Drošs kods
+  // Step 3: Jev Semantic AST analysis (Unit Level)
+  await step("U.3", "Jev AST Code Analysis Security Check (Safe vs Attack Patterns)", async () => {
+    // A: Safe code
     const safeRes = analyzeJevSemanticAst({
       code: "export function multiply(a: number, b: number) { return a * b; }",
       language: "typescript",
     });
 
     if (safeRes.verdict !== "SAFE" || safeRes.risk_score !== 0) {
-      throw new Error(`Drošs kods kļūdaini klasificēts kā ${safeRes.verdict} (Risk: ${safeRes.risk_score})`);
+      throw new Error(`Safe code incorrectly classified as ${safeRes.verdict} (Risk: ${safeRes.risk_score})`);
     }
 
-    // B: Ļaunprātīgs injekcijas kods (__proto__ + process.env)
+    // B: Malicious injection code (__proto__ + process.env)
     const maliciousCode = `
       const target = {};
       target.__proto__.isAdmin = true;
@@ -138,31 +138,31 @@ async function main() {
     });
 
     if (malRes.verdict !== "REJECTED") {
-      throw new Error(`Kaitīgs kods netika noraidīts! Spriedums: ${malRes.verdict}`);
+      throw new Error(`Malicious code was not rejected! Verdict: ${malRes.verdict}`);
     }
 
     if (!malRes.detected_patterns.prototype_manipulation) {
-      throw new Error(`Netika detektēta prototipa manipulācija!`);
+      throw new Error(`Prototype manipulation was not detected!`);
     }
     if (!malRes.detected_patterns.process_or_env_access) {
-      throw new Error(`Netika detektēta piekļuve process.env!`);
+      throw new Error(`process.env access was not detected!`);
     }
 
-    // C: Paranoid režīma taimeru pārbaude
+    // C: Paranoid mode timer check
     const paranoidRes = analyzeJevSemanticAst({
       code: "setTimeout(() => console.log('delayed'), 500);",
       strictness: "paranoid",
     });
 
     if (paranoidRes.violations.length === 0) {
-      throw new Error(`Paranoid režīmā netika pārtverts setTimeout!`);
+      throw new Error(`setTimeout was not intercepted in paranoid mode!`);
     }
 
-    return `Safe kods -> SAFE (0) | Injekcijas kods -> REJECTED (${malRes.risk_score}) ar 2 aizsardzības šabloniem`;
+    return `Safe code -> SAFE (0) | Injection code -> REJECTED (${malRes.risk_score}) with 2 security patterns`;
   });
 
-  // 4. Solis: Attālinātā MCP Servera tools/list pārbaude
-  await step("C.1", "MCP tools/list satur jaunos domēna rīkus", async () => {
+  // Step 4: Remote MCP Server tools/list check
+  await step("C.1", "MCP tools/list contains domain tools", async () => {
     const res = await fetch(`${BASE_URL}/mcp/messages`, {
       method: "POST",
       headers: {
@@ -178,28 +178,28 @@ async function main() {
     });
 
     if (res.status !== 200) {
-      throw new Error(`Gaidīts HTTP 200, saņemts ${res.status}`);
+      throw new Error(`Expected HTTP 200, got ${res.status}`);
     }
 
     const data = (await res.json()) as any;
     const tools = data.result?.tools;
     if (!Array.isArray(tools)) {
-      throw new Error(`Atbildē trūkst tools masīva: ${JSON.stringify(data)}`);
+      throw new Error(`Response missing tools array: ${JSON.stringify(data)}`);
     }
 
     const toolNames = tools.map((t: any) => t.name);
     if (!toolNames.includes("calculate_u_value_iso6946")) {
-      throw new Error(`Trūkst rīka 'calculate_u_value_iso6946'! Pieejamie: ${toolNames.join(", ")}`);
+      throw new Error(`Missing tool 'calculate_u_value_iso6946'! Available: ${toolNames.join(", ")}`);
     }
     if (!toolNames.includes("analyze_jev_semantic_ast")) {
-      throw new Error(`Trūkst rīka 'analyze_jev_semantic_ast'! Pieejamie: ${toolNames.join(", ")}`);
+      throw new Error(`Missing tool 'analyze_jev_semantic_ast'! Available: ${toolNames.join(", ")}`);
     }
 
-    return `Atrasti visi rīki: ${toolNames.join(", ")}`;
+    return `All tools discovered: ${toolNames.join(", ")}`;
   });
 
-  // 5. Solis: Attālināts izsaukums uz calculate_u_value_iso6946
-  await step("C.2", "MCP tools/call izsaukums uz calculate_u_value_iso6946", async () => {
+  // Step 5: Remote call to calculate_u_value_iso6946
+  await step("C.2", "MCP tools/call invocation of calculate_u_value_iso6946", async () => {
     const res = await fetch(`${BASE_URL}/mcp/messages`, {
       method: "POST",
       headers: {
@@ -215,8 +215,8 @@ async function main() {
           arguments: {
             direction: "horizontal",
             layers: [
-              { name: "Akmens vate", thickness_m: 0.15, lambda_w_mk: 0.035 },
-              { name: "Gāzbetons", thickness_m: 0.2, lambda_w_mk: 0.12 },
+              { name: "Mineral Wool", thickness_m: 0.15, lambda_w_mk: 0.035 },
+              { name: "Aerated Concrete", thickness_m: 0.2, lambda_w_mk: 0.12 },
             ],
           },
         },
@@ -224,24 +224,24 @@ async function main() {
     });
 
     if (res.status !== 200) {
-      throw new Error(`Gaidīts HTTP 200, saņemts ${res.status}: ${await res.text()}`);
+      throw new Error(`Expected HTTP 200, got ${res.status}: ${await res.text()}`);
     }
 
     const data = (await res.json()) as any;
     if (!data.result || !data.result.content || !data.result.content[0]) {
-      throw new Error(`Nepareizs MCP atbildes formāts: ${JSON.stringify(data)}`);
+      throw new Error(`Invalid MCP response format: ${JSON.stringify(data)}`);
     }
 
     const parsed = JSON.parse(data.result.content[0].text);
     if (!parsed.u_value_w_m2k || !parsed.total_r_m2k_w) {
-      throw new Error(`Atbildē trūkst u_value_w_m2k vai total_r_m2k_w: ${data.result.content[0].text}`);
+      throw new Error(`Response missing u_value_w_m2k or total_r_m2k_w: ${data.result.content[0].text}`);
     }
 
     return `U = ${parsed.u_value_w_m2k} W/(m²K) | R_tot = ${parsed.total_r_m2k_w} m²K/W`;
   });
 
-  // 6. Solis: Attālināts izsaukums uz analyze_jev_semantic_ast
-  await step("C.3", "MCP tools/call izsaukums uz analyze_jev_semantic_ast", async () => {
+  // Step 6: Remote call to analyze_jev_semantic_ast
+  await step("C.3", "MCP tools/call invocation of analyze_jev_semantic_ast", async () => {
     const res = await fetch(`${BASE_URL}/mcp/messages`, {
       method: "POST",
       headers: {
@@ -263,41 +263,41 @@ async function main() {
     });
 
     if (res.status !== 200) {
-      throw new Error(`Gaidīts HTTP 200, saņemts ${res.status}: ${await res.text()}`);
+      throw new Error(`Expected HTTP 200, got ${res.status}: ${await res.text()}`);
     }
 
     const data = (await res.json()) as any;
     const parsed = JSON.parse(data.result.content[0].text);
     if (parsed.verdict !== "SAFE") {
-      throw new Error(`Drošam kodam gaidīts SAFE, saņemts ${parsed.verdict}`);
+      throw new Error(`Expected SAFE for safe code, got ${parsed.verdict}`);
     }
 
-    return `Spriedums: ${parsed.verdict} | Riska rādītājs: ${parsed.risk_score}`;
+    return `Verdict: ${parsed.verdict} | Risk score: ${parsed.risk_score}`;
   });
 
   console.log(`\n================================================================`);
-  console.log(`                      TESTU KOPSAVILKUMS                        `);
+  console.log(`                       TEST SUMMARY                             `);
   console.log(`================================================================`);
 
   const passed = results.filter((r) => r.status === "PASS").length;
   const failed = results.filter((r) => r.status === "FAIL").length;
 
-  console.log(`Kopā soļi:    ${results.length}`);
-  console.log(`Veiksmīgi:    ${passed}`);
-  console.log(`Neveiksmīgi:  ${failed}`);
+  console.log(`Total steps:  ${results.length}`);
+  console.log(`Passed:       ${passed}`);
+  console.log(`Failed:       ${failed}`);
 
   if (failed > 0) {
-    console.error(`\n[VĀRTU KĻŪDA] Daži testi neizdevās:`);
+    console.error(`\n[GATE FAILURE] Some tests failed:`);
     results
       .filter((r) => r.status === "FAIL")
       .forEach((r) => console.error(` - [${r.step}] ${r.name}: ${r.error}`));
     process.exit(1);
   }
 
-  console.log(`\n[VĀRTI ATVĒRTI] Visi domēna rīku testi sekmīgi izturēti!\n`);
+  console.log(`\n[GATE OPEN] All domain tools tests passed successfully!\n`);
 }
 
 main().catch((err) => {
-  console.error("Kritiska kļūda testa izpildē:", err);
+  console.error("Critical error during test execution:", err);
   process.exit(1);
 });

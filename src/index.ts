@@ -170,7 +170,7 @@ export async function handleScheduled(
   let totalActiveKeys = 0;
   const lowBalanceKeys: LowBalanceRecord[] = [];
 
-  // b) Iziet cauri aktīvajām KV atslēgām (MCPX_KEYS.list({ prefix: "key:" }))
+  // b) Iterate through active KV keys (MCPX_KEYS.list({ prefix: "key:" }))
   if (env.MCPX_KEYS) {
     try {
       let cursor: string | undefined = undefined;
@@ -185,7 +185,7 @@ export async function handleScheduled(
             if (record && record.status === "active") {
               totalActiveKeys++;
               const balanceCents = record.billing?.balanceCents ?? 0;
-              // c) Atlasa klientus, kuru bilance ir zem 100 centiem ($1.00 USD)
+              // c) Identify clients with balance below 100 cents ($1.00 USD)
               if (balanceCents < 100) {
                 const keyId = record.keyId || item.name.replace(/^key:/, "").slice(0, 16);
                 lowBalanceKeys.push({
@@ -196,7 +196,7 @@ export async function handleScheduled(
               }
             }
           } catch {
-            // Ignorē atsevišķu nederīgu ierakstu parsēšanas kļūdas
+            // Ignore malformed individual entries
           }
         }
         cursor = listResult.list_complete ? undefined : listResult.cursor;
@@ -216,7 +216,7 @@ export async function handleScheduled(
     status: "HEALTHY",
   };
 
-  // d) Ieraksta dienas audita kopsavilkumu KV ierakstā stats:daily:${date} ar TTL 30 dienas
+  // d) Record daily audit summary to KV at stats:daily:${date} with 30-day TTL
   if (env.MCPX_KEYS) {
     try {
       await env.MCPX_KEYS.put(
@@ -229,7 +229,7 @@ export async function handleScheduled(
     }
   }
 
-  // e) Ja definēts env.ANALYTICS, ieraksta telemetrijas punktu par sistēmas veselības pārbaudi
+  // e) If env.ANALYTICS is configured, emit telemetry point for system health check
   if (env.ANALYTICS && typeof env.ANALYTICS.writeDataPoint === "function") {
     try {
       env.ANALYTICS.writeDataPoint({
@@ -255,7 +255,7 @@ export async function handleScheduled(
   return summary;
 }
 
-const MAX_PAYLOAD_BYTES = 512 * 1024; // 512 KB drošības slieksnis
+const MAX_PAYLOAD_BYTES = 512 * 1024; // 512 KB payload size ceiling
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -311,7 +311,7 @@ export default {
       return new Response(null, { headers: CORS_HEADERS });
     }
 
-    // 1. Publiskais veselības pārbaudes un Midnight Gourmet Dashboard maršruts
+    // 1. Public health check and Midnight Gourmet Dashboard route
     if (url.pathname === "/health" || (url.pathname === "/" && request.method === "GET")) {
       const healthData: HealthStatus = {
         status: "healthy",
@@ -325,7 +325,7 @@ export default {
 
       const accept = request.headers.get("accept") || "";
 
-      // Ja pieprasījums nāk no pārlūkprogrammas uz saknes ceļu (Accept satur text/html un nesatur application/json)
+      // If browser request to root path (Accept includes text/html and excludes application/json)
       if (url.pathname === "/" && accept.includes("text/html") && !accept.includes("application/json")) {
         return track(
           new Response(renderDashboardHtml(healthData), {
@@ -339,7 +339,7 @@ export default {
         );
       }
 
-      // Standarta JSON atbilde aģentiem, cURL un /health maršrutam
+      // Standard JSON response for agents, cURL, and /health endpoint
       return track(
         new Response(JSON.stringify(healthData, null, 2), {
           headers: {
@@ -352,7 +352,7 @@ export default {
       );
     }
 
-    // 1b. Mašīnlasāmā specifikācija LLM aģentiem (/llms.txt un /llms-full.txt)
+    // 1b. Machine-readable specification for LLM agents (/llms.txt and /llms-full.txt)
     if (url.pathname === "/llms.txt" || url.pathname === "/llms-full.txt") {
       const isFull = url.pathname === "/llms-full.txt";
       const baseLlms = `# mcpx — Model Context Protocol Gateway & Generation Engine
@@ -573,7 +573,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       );
     }
 
-    // Dinamiskā atslēgu izsniegšana (Admin/Headless - Stingrā perimetra aizsardzība)
+    // Dynamic API key provisioning (Admin/Headless - Strict perimeter defense)
     if (url.pathname === "/keys/provision") {
       if (request.method !== "POST") {
         return track(
@@ -585,7 +585,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         );
       }
 
-      // 1. Ātruma ierobežotājs (Rate Limiting perimetram: 5 req/min uz IP)
+      // 1. Rate Limiting for provisioning perimeter: 5 req/min per IP
       if (env.RATE_LIMITER) {
         const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
         const { success } = await env.RATE_LIMITER.limit({ key: `prov:${clientIp}` });
@@ -603,7 +603,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         }
       }
 
-      // 2. Stingra Master Administratora autorizācijas pārbaude ar timing-safe salīdzināšanu
+      // 2. Strict Master Administrator authorization check with constant-time comparison
       const masterAuth = await validateMasterAuth(request, env);
       if (!masterAuth.authorized) {
         const headers = new Headers(masterAuth.response.headers);
@@ -619,7 +619,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         );
       }
 
-      // 3. Krātuves pārbaude
+      // 3. Storage availability check
       if (!env.MCPX_KEYS) {
         return track(
           new Response(
@@ -630,7 +630,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         );
       }
 
-      // 4. Ievades datu validācija (TypeSafe Zod/TS shēma)
+      // 4. Input validation (TypeSafe schema)
       try {
         const payload = (await request.json()) as ProvisionKeyPayload;
 
@@ -743,9 +743,9 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       }
     }
 
-    // Atslēgu inventarizācija un saraksts administratoram (GET /keys)
+    // Key inventory and listing for administrator (GET /keys)
     if (url.pathname === "/keys" && request.method === "GET") {
-      // 1. Ātruma ierobežotājs (Rate limit 10 req/min)
+      // 1. Rate limiter (Rate limit 10 req/min)
       if (env.RATE_LIMITER) {
         const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
         const { success } = await env.RATE_LIMITER.limit({ key: `list:${clientIp}` });
@@ -760,7 +760,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         }
       }
 
-      // 2. Master administratora autorizācija
+      // 2. Master administrator authorization
       const masterAuth = await validateMasterAuth(request, env);
       if (!masterAuth.authorized) {
         const headers = new Headers(masterAuth.response.headers);
@@ -792,7 +792,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         const keysList: any[] = [];
 
         for (const k of listRes.keys) {
-          const rawKey = k.name.slice(4); // Noņem "key:" prefiksu
+          const rawKey = k.name.slice(4); // Remove "key:" prefix
           const rawRecord = await env.MCPX_KEYS.get(k.name, "text");
           if (!rawRecord) continue;
 
@@ -833,7 +833,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
               revokedAt: record.revokedAt || null,
             });
           } catch {
-            // Ignorē atsevišķu bojātu ierakstu
+            // Ignore malformed individual entries
           }
         }
 
@@ -859,12 +859,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       }
     }
 
-    // Atslēgas tūlītēja atsaukšana (DELETE /keys/:keyId vai POST /keys/revoke)
+    // Immediate API key revocation (DELETE /keys/:keyId or POST /keys/revoke)
     if (
       (request.method === "DELETE" && url.pathname.startsWith("/keys/")) ||
       (url.pathname === "/keys/revoke" && request.method === "POST")
     ) {
-      // 1. Ātruma ierobežotājs
+      // 1. Rate limiter
       if (env.RATE_LIMITER) {
         const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
         const { success } = await env.RATE_LIMITER.limit({ key: `del:${clientIp}` });
@@ -879,7 +879,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         }
       }
 
-      // 2. Master administratora autorizācija
+      // 2. Master administrator authorization
       const masterAuth = await validateMasterAuth(request, env);
       if (!masterAuth.authorized) {
         const headers = new Headers(masterAuth.response.headers);
@@ -928,12 +928,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           );
         }
 
-        // Meklējam atslēgu KV krātuvē:
-        // A variants: tiešā atslēga `key:<targetIdentifier>`
+        // Search for key in KV storage:
+        // Option A: Direct key `key:<targetIdentifier>`
         let actualKey = targetIdentifier;
         let rawRecord = await env.MCPX_KEYS.get(`key:${targetIdentifier}`, "text");
 
-        // B variants: rādītājs pēc `id:<targetIdentifier>`
+        // Option B: Pointer by `id:<targetIdentifier>`
         if (!rawRecord) {
           const resolvedKey = await env.MCPX_KEYS.get(`id:${targetIdentifier}`, "text");
           if (resolvedKey) {
@@ -942,7 +942,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           }
         }
 
-        // C variants: skenējam pēc `record.keyId`
+        // Option C: Scan across `record.keyId`
         if (!rawRecord) {
           const listRes = await env.MCPX_KEYS.list({ prefix: "key:" });
           for (const k of listRes.keys) {
@@ -957,7 +957,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                   break;
                 }
               } catch {
-                // Turpināt meklēšanu
+                // Continue scanning
               }
             }
           }
@@ -1010,9 +1010,9 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       }
     }
 
-    // Kredītu papildināšanas galapunkts administratoram (POST /keys/topup)
+    // Credit top-up endpoint for administrator (POST /keys/topup)
     if (url.pathname === "/keys/topup" && request.method === "POST") {
-      // 1. Ātruma ierobežotājs
+      // 1. Rate limiter
       if (env.RATE_LIMITER) {
         const clientIp = request.headers.get("cf-connecting-ip") || "anonymous";
         const { success } = await env.RATE_LIMITER.limit({ key: `topup:${clientIp}` });
@@ -1027,7 +1027,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         }
       }
 
-      // 2. Master administratora autorizācija
+      // 2. Master administrator authorization
       const masterAuth = await validateMasterAuth(request, env);
       if (!masterAuth.authorized) {
         const headers = new Headers(masterAuth.response.headers);
@@ -1083,7 +1083,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           );
         }
 
-        // Meklējam atslēgu KV krātuvē
+        // Search for key in KV storage
         let actualKey = targetIdentifier;
         let rawRecord = await env.MCPX_KEYS.get(`key:${targetIdentifier}`, "text");
 
@@ -1114,7 +1114,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                   break;
                 }
               } catch {
-                // Turpināt meklēšanu
+                // Continue scanning
               }
             }
           }
@@ -1175,12 +1175,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       }
     }
 
-    // Creem.io Fiat Webhook Vārteja (POST /webhooks/creem)
+    // Creem.io Fiat Webhook Gateway (POST /webhooks/creem)
     if (url.pathname === "/webhooks/creem") {
       return handleCreemWebhook(request, env, ctx);
     }
 
-    // Atslēgas pašapkalpošanās verifikācija un bilances nolasīšana (POST /keys/verify)
+    // Key self-service verification and balance inspection (POST /keys/verify)
     if (url.pathname === "/keys/verify" && request.method === "POST") {
       if (!env.MCPX_KEYS) {
         return track(
@@ -1215,12 +1215,12 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         let actualKey = targetKey;
         let rawRecord: string | null = null;
 
-        // 1. Tiešā atslēga key:<targetKey>
+        // 1. Direct key lookup key:<targetKey>
         if (targetKey) {
           rawRecord = await env.MCPX_KEYS.get(`key:${targetKey}`, "text");
         }
 
-        // 2. Rādītājs id:<targetKeyId vai targetKey>
+        // 2. Pointer lookup id:<targetKeyId or targetKey>
         if (!rawRecord) {
           const lookupId = targetKeyId || targetKey;
           const resolved = await env.MCPX_KEYS.get(`id:${lookupId}`, "text");
@@ -1230,7 +1230,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           }
         }
 
-        // 3. Skenēšana pēc keyId
+        // 3. Scan by keyId
         if (!rawRecord) {
           const lookupId = targetKeyId || targetKey;
           const listRes = await env.MCPX_KEYS.list({ prefix: "key:" });
@@ -1246,7 +1246,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
                   break;
                 }
               } catch {
-                // Turpināt meklēšanu
+                // Continue scanning
               }
             }
           }
@@ -1294,7 +1294,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       }
     }
 
-    // Atslēgas statusa un patēriņa pārbaude (GET /keys/status)
+    // Key status and usage verification (GET /keys/status)
     if (url.pathname === "/keys/status" && request.method === "GET") {
       const auth = await requireAuth(request, env);
       if (!auth.authorized) {
@@ -1339,7 +1339,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       );
     }
 
-    // 1c. Tiešā REST rīku izpildes vārteja (POST /tools/execute)
+    // 1c. Direct REST tool execution gateway (POST /tools/execute)
     if (url.pathname === "/tools/execute" && request.method === "POST") {
       const auth = await requireAuth(request, env);
       if (!auth.authorized) {
@@ -1484,7 +1484,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       }
     }
 
-    // SSE plūsmas ceļš (/sse un /mcp/sse)
+    // SSE stream endpoint (/sse and /mcp/sse)
     if ((url.pathname === "/sse" || url.pathname === "/mcp/sse") && request.method === "GET") {
       return track(
         new Response("event: endpoint\ndata: /message\n\n", {
@@ -1501,7 +1501,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       );
     }
 
-    // 2. Apstrādes un koda ģenerēšanas maršruts (/api/generate, /message, /mcp/messages, vai POST /)
+    // 2. Processing and code generation route (/api/generate, /message, /mcp/messages, or POST /)
     if (
       url.pathname === "/api/generate" ||
       url.pathname === "/message" ||
@@ -1519,7 +1519,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         );
       }
 
-      // 2.0. Ātruma ierobežotāja pārbaude (Rate Limiting: 10 req/min)
+      // 2.0. Rate limiter check (Rate Limiting: 10 req/min)
       if (env.RATE_LIMITER) {
         const clientKey = request.headers.get("cf-connecting-ip") || "anonymous";
         const { success } = await env.RATE_LIMITER.limit({ key: clientKey });
@@ -1544,7 +1544,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         }
       }
 
-      // 2.1. Payload izmēra pārbaude pirms lasīšanas atmiņā
+      // 2.1. Payload size check prior to reading into memory
       const contentLength = request.headers.get("content-length");
       if (contentLength && parseInt(contentLength, 10) > MAX_PAYLOAD_BYTES) {
         return track(
@@ -1558,7 +1558,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         );
       }
 
-      // 2.2. Autorizācijas pārbaude (KV vai Master atslēga)
+      // 2.2. Authorization check (KV or Master key)
       const auth = await requireAuth(request, env);
       if (!auth.authorized) {
         const headers = new Headers(auth.response.headers);
@@ -1578,7 +1578,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       const { userId, plan, requestsLimit, tenantId } = auth.context;
       const activeTenant = tenantId || userId;
 
-      // 2.3. Lietotāja kvotas pārbaude (ja definēts requestsLimit)
+      // 2.3. User quota check (if requestsLimit is defined)
       if (requestsLimit !== undefined && env.MCPX_KEYS) {
         const currentUsageStr = await env.MCPX_KEYS.get(`usage:${userId}`, "text");
         const currentUsage = currentUsageStr ? parseInt(currentUsageStr, 10) || 0 : 0;
@@ -1598,15 +1598,15 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
         }
       }
 
-      // 2.4. Pieprasījuma satura nolasīšana un apstrāde
+      // 2.4. Request body parsing and processing
       try {
         const body = (await request.json()) as any;
 
-        // Model Context Protocol (MCP) JSON-RPC 2.0 atbalsts
+        // Model Context Protocol (MCP) JSON-RPC 2.0 support
         if (body && typeof body === "object" && body.jsonrpc === "2.0" && typeof body.method === "string") {
           const reqId = body.id;
 
-          // MCP Dzīvescikls: initialize
+          // MCP Lifecycle: initialize
           if (body.method === "initialize") {
             return track(
               new Response(
@@ -1635,7 +1635,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             );
           }
 
-          // MCP Dzīvescikls: notifications/initialized
+          // MCP Lifecycle: notifications/initialized
           if (body.method === "notifications/initialized") {
             return track(
               new Response(
@@ -1649,7 +1649,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             );
           }
 
-          // MCP Rīku atklāšana: tools/list
+          // MCP Tool discovery: tools/list
           if (body.method === "tools/list") {
             return track(
               new Response(
@@ -1757,7 +1757,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             );
           }
 
-          // MCP Rīku izpilde: tools/call
+          // MCP Tool execution: tools/call
           if (body.method === "tools/call") {
             const rawToolName = body.params?.name;
             const toolName = resolveCanonicalToolName(rawToolName);
@@ -1787,7 +1787,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
               );
             }
 
-            // x402 / L402 Kredītu pārbaude
+            // x402 / L402 Credit check
             const cost = getToolCostCents(toolName);
             if (auth.context.billing.mode !== "unlimited" && auth.context.billing.balanceCents < cost) {
               return track(
@@ -1796,7 +1796,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
               );
             }
 
-            // Atomārā bilances atskaitīšana
+            // Atomic balance deduction
             const { balanceCents, lowBalance } = await deductCredits(
               env,
               auth.context.apiKey,
@@ -2006,7 +2006,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
             );
           }
 
-          // Citi neatpazīti JSON-RPC izsaukumi
+          // Other unrecognized JSON-RPC calls
           return track(
             new Response(
               JSON.stringify({
@@ -2023,7 +2023,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
           );
         }
 
-        // 2.5. Tradicionālā (legacy) HTTP POST specifikācijas ģenerēšana
+        // 2.5. Legacy HTTP POST specification generation
         const cost = 5;
         if (auth.context.billing.mode !== "unlimited" && auth.context.billing.balanceCents < cost) {
           return track(
@@ -2057,7 +2057,7 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
 
         const result = await generateMcpSpec(rawInput, env.GEMINI_API_KEY);
 
-        // 2.6. Asinhrona patēriņa uzskaite tikai pēc veiksmīga Gemini izsaukuma
+        // 2.6. Asynchronous usage accounting only after successful Gemini call
         ctx.waitUntil(recordUsage(env, userId));
 
         return track(

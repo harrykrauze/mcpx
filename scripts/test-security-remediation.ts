@@ -6,60 +6,60 @@ import { RemoteMcpSseGateway } from '../src/core/remoteSseAdapter.js';
 import rateLimit from 'express-rate-limit';
 
 async function runSecurityRemediationTests() {
-  console.log('=== MCPX DROŠĪBAS REMEDIĀCIJAS TESTI (SPRINT 1) ===\n');
+  console.log('=== MCPX SECURITY REMEDIATION TESTS (SPRINT 1) ===\n');
 
   // -------------------------------------------------------------------------
-  // 1. TESTS: SSRF un privāto IP/adrešu bloķēšanas pārbaude
+  // 1. TEST: SSRF and Private IP/Host Blocking Verification
   // -------------------------------------------------------------------------
-  console.log('1. Pārbaudām SSRF filtru un privāto apakštīklu bloķēšanu...');
+  console.log('1. Testing SSRF filter and private subnet blocking...');
 
   const blockedTargets = [
-    { url: 'http://169.254.169.254/latest/meta-data/', desc: 'Mākoņa metadatu IP (169.254.169.254)' },
-    { url: 'https://169.254.169.254/latest/meta-data/', desc: 'HTTPS Mākoņa metadatu IP (169.254.169.254)' },
-    { url: 'http://172.16.0.1/admin', desc: 'RFC 1918 privātais tīkls (172.16.0.1)' },
-    { url: 'https://172.16.0.1/admin', desc: 'HTTPS RFC 1918 privātais tīkls (172.16.0.1)' },
-    { url: 'http://172.31.255.255/internal', desc: 'RFC 1918 privātais tīkls (172.31.255.255)' },
-    { url: 'http://10.0.0.1/secrets', desc: 'RFC 1918 privātais tīkls (10.0.0.1)' },
-    { url: 'http://192.168.1.1/router', desc: 'RFC 1918 privātais tīkls (192.168.1.1)' },
-    { url: 'http://0.0.0.0:8080/', desc: 'Nenoteiktā adrese (0.0.0.0)' },
-    { url: 'http://metadata.google.internal/computeMetadata/v1/', desc: 'GCP iekšējais metadatu domēns' },
-    { url: 'http://[::1]:3000/', desc: 'IPv6 Loopback ([::1]) bez https' },
+    { url: 'http://169.254.169.254/latest/meta-data/', desc: 'Cloud metadata IP (169.254.169.254)' },
+    { url: 'https://169.254.169.254/latest/meta-data/', desc: 'HTTPS Cloud metadata IP (169.254.169.254)' },
+    { url: 'http://172.16.0.1/admin', desc: 'RFC 1918 private network (172.16.0.1)' },
+    { url: 'https://172.16.0.1/admin', desc: 'HTTPS RFC 1918 private network (172.16.0.1)' },
+    { url: 'http://172.31.255.255/internal', desc: 'RFC 1918 private network (172.31.255.255)' },
+    { url: 'http://10.0.0.1/secrets', desc: 'RFC 1918 private network (10.0.0.1)' },
+    { url: 'http://192.168.1.1/router', desc: 'RFC 1918 private network (192.168.1.1)' },
+    { url: 'http://0.0.0.0:8080/', desc: 'Unspecified address (0.0.0.0)' },
+    { url: 'http://metadata.google.internal/computeMetadata/v1/', desc: 'GCP internal metadata domain' },
+    { url: 'http://[::1]:3000/', desc: 'IPv6 Loopback ([::1]) without https' },
     { url: 'https://[fc00::1]/internal', desc: 'IPv6 ULA (fc00::/7)' },
     { url: 'https://[fe80::1]/link-local', desc: 'IPv6 Link-Local (fe80::/10)' },
     { url: 'https://[::ffff:169.254.169.254]/meta', desc: 'IPv4-mapped IPv6 Cloud Metadata' },
     { url: 'https://0x7f000001/admin', desc: 'Hex DWORD loopback (0x7f000001)' },
     { url: 'https://0xa9fea9fe/metadata', desc: 'Hex DWORD link-local (0xa9fea9fe)' },
-    { url: 'http://api.external-domain.com/v1', desc: 'Nešifrēts HTTP uz publisku domēnu' },
-    { url: 'ftp://api.example.com/file', desc: 'Aizliegts protokols (FTP)' },
+    { url: 'http://api.external-domain.com/v1', desc: 'Unencrypted HTTP to public domain' },
+    { url: 'ftp://api.example.com/file', desc: 'Disallowed protocol (FTP)' },
   ];
 
   for (const target of blockedTargets) {
     const res = validateSafeUrl(target.url);
     if (res.valid) {
-      throw new Error(`SSRF tests NEIZDEVĀS: Bīstamais URL netika bloķēts: ${target.url} (${target.desc})`);
+      throw new Error(`SSRF test FAILED: Dangerous URL was not blocked: ${target.url} (${target.desc})`);
     }
-    console.log(`   [BLOĶĒTS] ${target.desc} -> ${res.error}`);
+    console.log(`   [BLOCKED] ${target.desc} -> ${res.error}`);
   }
 
-  // Pārbaudām derīgas un uzticamas adreses
+  // Verify valid and trusted addresses
   const validUrl = 'https://api.fintech-shield.internal/v2/risk/evaluate';
   const validCheck = validateSafeUrl(validUrl, 'https://api.fintech-shield.internal');
   if (!validCheck.valid || !validCheck.isTrustedOrigin) {
-    throw new Error(`SSRF tests NEIZDEVĀS: Derīgs HTTPS URL tika kļūdaini noraidīts vai origin netika atpazīts!`);
+    throw new Error(`SSRF test FAILED: Valid HTTPS URL was rejected or origin not recognized!`);
   }
-  console.log(`   [ATĻAUTS] Uzticams HTTPS mērķis -> ${validUrl} (isTrustedOrigin: ${validCheck.isTrustedOrigin})`);
+  console.log(`   [ALLOWED] Trusted HTTPS target -> ${validUrl} (isTrustedOrigin: ${validCheck.isTrustedOrigin})`);
 
-  // Pārbaudām uzticamās izcelsmes (origin) nošķiršanu
+  // Verify untrusted origin segregation
   const untrustedOriginCheck = validateSafeUrl('https://other-service.com/api', 'https://api.fintech-shield.internal');
   if (!untrustedOriginCheck.valid || untrustedOriginCheck.isTrustedOrigin) {
-    throw new Error('SSRF tests NEIZDEVĀS: Sveša izcelsme kļūdaini atzīta par uzticamu!');
+    throw new Error('SSRF test FAILED: Untrusted origin erroneously treated as trusted!');
   }
-  console.log(`   [ATĻAUTS AR IZOLĀCIJU] Ārējs HTTPS mērķis bez atslēgas piesaistes -> isTrustedOrigin: false`);
+  console.log(`   [ALLOWED WITH ISOLATION] External HTTPS target without credential binding -> isTrustedOrigin: false`);
 
   // -------------------------------------------------------------------------
-  // 2. TESTS: /api/generate autentifikācija un 401 Unauthorized pārbaude
+  // 2. TEST: /api/generate authentication and 401 Unauthorized check
   // -------------------------------------------------------------------------
-  console.log('\n2. Pārbaudām /api/generate maršruta aizsardzību un 401 statusu...');
+  console.log('\n2. Testing /api/generate route protection and 401 status...');
 
   const app = express();
   app.use(express.json());
@@ -88,49 +88,49 @@ async function runSecurityRemediationTests() {
   });
 
   try {
-    // 2.1. Pieprasījums bez autentifikācijas
+    // 2.1. Request without authentication
     const unauthedRes = await fetch('http://127.0.0.1:4040/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ inputSnippet: 'curl https://api.example.com' }),
     });
 
-    console.log(`   Neautorizēta pieprasījuma statuss: ${unauthedRes.status}`);
+    console.log(`   Unauthorized request status: ${unauthedRes.status}`);
     const wwwAuth = unauthedRes.headers.get('WWW-Authenticate') || '';
-    console.log(`   WWW-Authenticate galvene: ${wwwAuth}`);
+    console.log(`   WWW-Authenticate header: ${wwwAuth}`);
 
     if (unauthedRes.status !== 401) {
-      throw new Error(`Neautorizētam pieprasījumam jāatgriež 401, bet saņemts ${unauthedRes.status}`);
+      throw new Error(`Unauthorized request should return 401, received ${unauthedRes.status}`);
     }
     if (!wwwAuth.includes('resource_metadata=') || !wwwAuth.includes('.well-known/oauth-protected-resource')) {
-      throw new Error(`WWW-Authenticate galvenē trūkst RFC 9728 resource_metadata norādes!`);
+      throw new Error(`WWW-Authenticate header missing RFC 9728 resource_metadata indicator!`);
     }
 
-    // 2.2. RFC 8414 un RFC 9728 metadatu galapunktu pārbaude
-    console.log('\n3. Pārbaudām RFC 8414 un RFC 9728 atklāšanas galapunktus...');
+    // 2.2. RFC 8414 and RFC 9728 metadata endpoint verification
+    console.log('\n3. Testing RFC 8414 and RFC 9728 discovery endpoints...');
 
     const authServerMetaRes = await fetch('http://127.0.0.1:4040/.well-known/oauth-authorization-server');
     if (authServerMetaRes.status !== 200) {
-      throw new Error(`RFC 8414 galapunkts atgrieza statusu ${authServerMetaRes.status}`);
+      throw new Error(`RFC 8414 endpoint returned status ${authServerMetaRes.status}`);
     }
     const authServerMeta = (await authServerMetaRes.json()) as any;
     if (!authServerMeta.issuer || !authServerMeta.token_endpoint) {
-      throw new Error('RFC 8414 atbildē trūkst issuer vai token_endpoint!');
+      throw new Error('RFC 8414 response missing issuer or token_endpoint!');
     }
     console.log(`   [OK] RFC 8414 /.well-known/oauth-authorization-server: issuer='${authServerMeta.issuer}'`);
 
     const protectedResMetaRes = await fetch('http://127.0.0.1:4040/.well-known/oauth-protected-resource');
     if (protectedResMetaRes.status !== 200) {
-      throw new Error(`RFC 9728 galapunkts atgrieza statusu ${protectedResMetaRes.status}`);
+      throw new Error(`RFC 9728 endpoint returned status ${protectedResMetaRes.status}`);
     }
     const protectedResMeta = (await protectedResMetaRes.json()) as any;
     if (!protectedResMeta.resource || !protectedResMeta.authorization_servers) {
-      throw new Error('RFC 9728 atbildē trūkst resource vai authorization_servers!');
+      throw new Error('RFC 9728 response missing resource or authorization_servers!');
     }
     console.log(`   [OK] RFC 9728 /.well-known/oauth-protected-resource: resource='${protectedResMeta.resource}'`);
 
-    // 2.3. Autentificēts pieprasījums ar Scoped API atslēgu
-    console.log('\n4. Pārbaudām autorizētu pieprasījumu ar Scoped API atslēgu...');
+    // 2.3. Authenticated request with Scoped API key
+    console.log('\n4. Testing authorized request with Scoped API key...');
     const apiKeyData = testGuard.createScopedApiKey({
       tenantId: 'tenant_test',
       scopes: ['mcp:connect', 'mcp:generate'],
@@ -145,14 +145,14 @@ async function runSecurityRemediationTests() {
       body: JSON.stringify({ inputSnippet: 'curl https://api.example.com' }),
     });
 
-    console.log(`   Autorizēta pieprasījuma statuss: ${authedRes.status}`);
+    console.log(`   Authorized request status: ${authedRes.status}`);
     if (authedRes.status !== 200) {
       const errText = await authedRes.text();
-      throw new Error(`Autorizētam pieprasījumam bija jāatgriež 200, bet saņemts ${authedRes.status}: ${errText}`);
+      throw new Error(`Authorized request should return 200, received ${authedRes.status}: ${errText}`);
     }
 
-    // 2.4. Strikta JWT pārbaude (iss, aud, exp)
-    console.log('\n5. Pārbaudām striktu JWT validāciju (iss, aud, exp, clock skew)...');
+    // 2.4. Strict JWT verification (iss, aud, exp)
+    console.log('\n5. Testing strict JWT validation (iss, aud, exp, clock skew)...');
     const client = testGuard.registerClient({ client_name: 'test-agent' });
     const tokenObj = testGuard.exchangeToken({
       grant_type: 'client_credentials',
@@ -172,17 +172,17 @@ async function runSecurityRemediationTests() {
     });
 
     if (jwtAuthedRes.status !== 200) {
-      throw new Error(`Pieprasījums ar derīgu JWT tokenu atgrieza statusu ${jwtAuthedRes.status}`);
+      throw new Error(`Request with valid JWT token returned status ${jwtAuthedRes.status}`);
     }
-    console.log(`   [OK] Derīgs JWT tokens ar iss un aud tika veiksmīgi pieņemts.`);
+    console.log(`   [OK] Valid JWT token with iss and aud accepted successfully.`);
 
-    console.log('\n=== VISI REMEDIĀCIJAS TESTI VEIKSMĪGI IZTURĒTI! ===\n');
+    console.log('\n=== ALL REMEDIATION TESTS PASSED SUCCESSFULLY! ===\n');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
 }
 
 runSecurityRemediationTests().catch((err) => {
-  console.error('\nTesta kļūda:', err);
+  console.error('\nTest error:', err);
   process.exit(1);
 });

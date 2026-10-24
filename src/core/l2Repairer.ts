@@ -9,12 +9,12 @@ export async function executeL2Repair(
 ): Promise<string> {
   const key = apiKey || process.env.GEMINI_API_KEY;
   if (!key) {
-    throw new Error("Trūkst GEMINI_API_KEY vides mainīgā L2 labotāja izsaukumam.");
+    throw new Error("Missing GEMINI_API_KEY environment variable for L2 repairer.");
   }
 
   const ai = new GoogleGenAI({ apiKey: key });
-  const schemaErrors = payload.summary.startsWith("MCP rīka manifesta shēmas kļūda:")
-    ? [payload.summary.replace("MCP rīka manifesta shēmas kļūda: ", "")]
+  const schemaErrors = payload.summary.startsWith("MCP tool manifest schema error:")
+    ? [payload.summary.replace("MCP tool manifest schema error: ", "")]
     : undefined;
 
   const { systemInstruction, userPrompt } = buildL2RepairPrompt({
@@ -30,7 +30,7 @@ export async function executeL2Repair(
       systemInstruction,
       temperature: 0.1,
       thinkingConfig: {
-        thinkingBudget: 2048 // Mērens domāšanas dziļums strukturālai analīzei
+        thinkingBudget: 2048 // Moderate thinking budget for structural analysis
       }
     }
   });

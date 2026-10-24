@@ -1,8 +1,8 @@
 /**
  * src/services/creemSignature.ts
  * 
- * Deterministiska Creem.io Webhook HMAC SHA-256 Kriptogrāfiskā Verifikācija.
- * Atbilst W3C Web Crypto standartam, pilnībā saderīga ar Cloudflare Workers un Node.js runtime.
+ * Deterministic Creem.io Webhook HMAC SHA-256 Cryptographic Verification.
+ * Compliant with W3C Web Crypto standard, fully compatible with Cloudflare Workers and Node.js runtimes.
  */
 
 function hexToBytes(hex: string): Uint8Array | null {
@@ -19,11 +19,11 @@ function hexToBytes(hex: string): Uint8Array | null {
 }
 
 /**
- * Pārbauda Creem.io webhook HMAC SHA-256 parakstu.
+ * Verifies Creem.io webhook HMAC SHA-256 signature.
  * 
- * @param rawBody - Neapstrādāta pieprasījuma pamatteksta virkne (raw body string)
- * @param signatureHeader - creem-signature vai x-creem-signature galvenes vērtība (hex formāts)
- * @param secret - CREEM_WEBHOOK_SECRET noslēpums
+ * @param rawBody - Raw unparsed request body string
+ * @param signatureHeader - creem-signature or x-creem-signature header value (hex format)
+ * @param secret - CREEM_WEBHOOK_SECRET secret key
  */
 export async function verifyCreemSignature(
   rawBody: string,
@@ -64,7 +64,7 @@ export async function verifyCreemSignature(
 }
 
 /**
- * Ģenerē HMAC SHA-256 parakstu Web Crypto API vidē (izmantošanai testos un simulācijās).
+ * Generates HMAC SHA-256 signature in Web Crypto API environment (for tests and simulations).
  */
 export async function generateCreemSignature(
   rawBody: string,

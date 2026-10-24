@@ -43,7 +43,7 @@ export const generatorLimiter = rateLimit({
     res.setHeader('Retry-After', String(retryAfter));
     res.status(429).json({
       error: 'too_many_requests',
-      error_description: 'Pieprasījumu limits pārsniegts (maksimums 10 pieprasījumi minūtē). Lūdzu, mēģiniet vēlāk.',
+      error_description: 'Rate limit exceeded (maximum 10 requests per minute). Please try again later.',
       retryAfter,
     });
   },

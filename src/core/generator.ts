@@ -89,8 +89,8 @@ export function getGeminiClient(): GoogleGenAI | null {
 }
 
 /**
- * Pārbauda, vai hostdators/IP adrese pieder privātajiem tīkliem, lokālajām adresēm,
- * mākoņpakalpojumu metadatiem vai aizliegtajiem diapazoniem (SSRF aizsardzība).
+ * Checks whether hostname/IP belongs to private networks, loopback addresses,
+ * cloud metadata endpoints, or forbidden ranges (SSRF protection).
  */
 export function isPrivateOrBlockedHost(hostname: string, allowLocalhost = false): boolean {
   const host = hostname.replace(/^\[|\]$/g, '').trim().toLowerCase();
@@ -99,16 +99,16 @@ export function isPrivateOrBlockedHost(hostname: string, allowLocalhost = false)
     return !allowLocalhost;
   }
 
-  // IPv6 pārbaudes
+  // IPv6 checks
   if (host === '::1' || host === '::' || host === '0:0:0:0:0:0:0:1' || host === '0:0:0:0:0:0:0:0') {
     return !allowLocalhost;
   }
-  // fc00::/7 (Unique Local Address) vai fe80::/10 (Link-Local)
+  // fc00::/7 (Unique Local Address) or fe80::/10 (Link-Local)
   if (host.startsWith('fc') || host.startsWith('fd') || /^fe[89ab]/i.test(host)) {
     return true;
   }
 
-  // IPv4-kartēts IPv6 (::ffff:127.0.0.1 vai ::ffff:a9fe:a9fe)
+  // IPv4-mapped IPv6 (::ffff:127.0.0.1 or ::ffff:a9fe:a9fe)
   if (host.startsWith('::ffff:')) {
     const rest = host.slice(7);
     if (rest.includes(':')) {
@@ -131,13 +131,13 @@ export function isPrivateOrBlockedHost(hostname: string, allowLocalhost = false)
     }
   }
 
-  // IPv4 vai IPv4-kartēts IPv6 (::ffff:127.0.0.1)
+  // IPv4 or IPv4-mapped IPv6 (::ffff:127.0.0.1)
   let ipv4 = host;
   if (host.startsWith('::ffff:')) {
     ipv4 = host.slice(7);
   }
 
-  // Pārbauda heksadecimālo DWORD (piemēram 0x7f000001 vai 0xa9fea9fe)
+  // Check hexadecimal DWORD (e.g. 0x7f000001 or 0xa9fea9fe)
   if (/^0x[0-9a-f]+$/i.test(ipv4)) {
     const num = parseInt(ipv4, 16);
     if (!isNaN(num) && num >= 0 && num <= 4294967295) {
@@ -149,7 +149,7 @@ export function isPrivateOrBlockedHost(hostname: string, allowLocalhost = false)
     }
   }
 
-  // Pārbauda decimālo skaitļu notāciju (piemēram, 2130706433 vai 2852039166)
+  // Check decimal notation (e.g. 2130706433 or 2852039166)
   if (/^\d+$/.test(ipv4)) {
     const num = parseInt(ipv4, 10);
     if (!isNaN(num) && num >= 0 && num <= 4294967295) {
@@ -161,7 +161,7 @@ export function isPrivateOrBlockedHost(hostname: string, allowLocalhost = false)
     }
   }
 
-  // Pārbauda punktēto notāciju (tostarp oktālos 0177.0.0.1 vai heksa 0x7f.0.0.1 oktetus)
+  // Check dotted notation (including octal 0177.0.0.1 or hex 0x7f.0.0.1 octets)
   const parts = ipv4.split('.');
   if (parts.length === 4) {
     const parsedParts = parts.map((p) => {
@@ -187,7 +187,7 @@ export function isPrivateOrBlockedHost(hostname: string, allowLocalhost = false)
 }
 
 /**
- * Validē URL protokolu, SSRF ierobežojumus un uzticamās izcelsmes (origin) atbilstību.
+ * Validates URL protocol, SSRF constraints, and trusted origin alignment.
  */
 export function validateSafeUrl(
   rawUrl: string,
@@ -198,7 +198,7 @@ export function validateSafeUrl(
   try {
     parsed = new URL(rawUrl);
   } catch (err: any) {
-    return { valid: false, error: `Nederīgs URL formāts: ${err?.message || rawUrl}` };
+    return { valid: false, error: `Invalid URL format: ${err?.message || rawUrl}` };
   }
 
   const allowLocal = options?.allowLocalhost ?? (process.env.ALLOW_LOCAL_TARGETS === 'true');
@@ -207,14 +207,14 @@ export function validateSafeUrl(
   if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLocalHost && allowLocal)) {
     return {
       valid: false,
-      error: `Protokols '${parsed.protocol}' ir aizliegts. Atļauts tikai HTTPS (vai HTTP lokālajai izstrādei uz localhost/127.0.0.1).`,
+      error: `Protocol '${parsed.protocol}' is prohibited. Only HTTPS is allowed (or HTTP for local development on localhost/127.0.0.1).`,
     };
   }
 
   if (isPrivateOrBlockedHost(parsed.hostname, allowLocal)) {
     return {
       valid: false,
-      error: `Piekļuve privātajai vai bloķētajai adresei '${parsed.hostname}' ir liegta (SSRF aizsardzība).`,
+      error: `Access to private or blocked address '${parsed.hostname}' is denied (SSRF protection).`,
     };
   }
 

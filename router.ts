@@ -16,7 +16,7 @@ export interface RepairPayload {
   }>;
 }
 
-// L1 kļūdu deterministiskais saraksts
+// Deterministic list of L1 error codes
 const L1_ERROR_CODES = new Set([
   "TS2304", // Cannot find name
   "TS2307", // Cannot find module
@@ -36,28 +36,28 @@ export function routeDiagnostics(
       tier: "CLEAN",
       targetModel: null,
       thinkingLevel: null,
-      summary: "Kompilācija un shēmas pārbaude sekmīga.",
+      summary: "Compilation and schema verification successful.",
       trimmedDiagnostics: []
     };
   }
 
-  // Ja ir shēmas validācijas kļūdas (MCP SDK manifesta defekts) -> uzreiz L2 Argon
+  // If schema validation errors exist (MCP SDK manifest defect) -> route directly to L2 Argon
   if (schemaErrors && schemaErrors.length > 0) {
     return {
       tier: "L2_ARGON",
       targetModel: "gemini-4-argon",
       thinkingLevel: "medium",
-      summary: `MCP rīka manifesta shēmas kļūda: ${schemaErrors.join("; ")}`,
+      summary: `MCP tool manifest schema error: ${schemaErrors.join("; ")}`,
       trimmedDiagnostics: []
     };
   }
 
   const rawDiagnostics = verification.diagnostics || [];
 
-  // Apgriež kļūdu skaitu: ņem maksimums pirmās 3 būtiskākās kļūdas, lai netērētu tokenus
+  // Trim error diagnostics: retain top 3 critical diagnostics to preserve token context
   const trimmedDiagnostics = rawDiagnostics.slice(0, 3);
 
-  // Pārbauda, vai visas kļūdas ietilpst L1 kategorijā
+  // Check if all diagnostics fall under L1 category
   const isPureL1 =
     trimmedDiagnostics.length > 0 &&
     trimmedDiagnostics.every(d => L1_ERROR_CODES.has(d.code));
@@ -67,17 +67,17 @@ export function routeDiagnostics(
       tier: "L1_FLASH",
       targetModel: "gemini-3.8-flash",
       thinkingLevel: "low",
-      summary: `Izolēti sintakses/tipu defekti (${trimmedDiagnostics.map(d => d.code).join(", ")}). Virzīt uz ātru labojumu.`,
+      summary: `Isolated syntax/type defects (${trimmedDiagnostics.map(d => d.code).join(", ")}). Routing to fast L1 repair.`,
       trimmedDiagnostics
     };
   }
 
-  // Ja satur vismaz vienu strukturālu defektu vai kompleksu tipu kļūdu -> L2 Argon
+  // If containing structural defects or complex type mismatches -> route to L2 Argon
   return {
     tier: "L2_ARGON",
     targetModel: "gemini-4-argon",
     thinkingLevel: "medium",
-    summary: `Strukturālas vai semantiskas kļūdas (${trimmedDiagnostics.map(d => d.code).join(", ")}). Nepieciešama dziļāka loģikas rekonstrukcija.`,
+    summary: `Structural or semantic errors (${trimmedDiagnostics.map(d => d.code).join(", ")}). Requires deeper logic reconstruction.`,
     trimmedDiagnostics
   };
 }

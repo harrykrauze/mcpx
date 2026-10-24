@@ -26,14 +26,14 @@ export async function verifyMcpTool(sourceCode: string): Promise<VerificationRes
     await fs.mkdir(tempDir, { recursive: true });
     await fs.writeFile(targetFile, sourceCode, "utf8");
 
-    // Izpilda tsc pārbaudi pret izolēto konfigurāciju
+    // Execute tsc check against isolated configuration
     const tscBin = path.resolve("./node_modules/typescript/bin/tsc");
     await execAsync(`node "${tscBin}" --project tsconfig.sandbox.json --pretty false`, {
       timeout: 15000,
       env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=512" }
     });
 
-    // Ja kompilācija iziet ar kodu 0 - atgriež panākumu
+    // If compilation succeeds with exit code 0 - return success
     return { valid: true };
   } catch (error: any) {
     const stdout = error.stdout || "";
@@ -46,7 +46,7 @@ export async function verifyMcpTool(sourceCode: string): Promise<VerificationRes
       diagnostics
     };
   } finally {
-    // Iztīra pagaidu failus
+    // Clean up temporary files
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
   }
 }
@@ -59,7 +59,7 @@ function parseCompilerOutput(
   const codeLines = sourceCode.split(/\r?\n/);
   const diagnostics: NonNullable<VerificationResult["diagnostics"]> = [];
 
-  // Pārtver TS kļūdas formātā: file.ts(rinda,kolonna): error TSxxxx: ziņa
+  // Capture TS errors formatted as: file.ts(line,col): error TSxxxx: message
   const tsRegex = /\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.+)/;
 
   for (const line of lines) {
@@ -70,7 +70,7 @@ function parseCompilerOutput(
       const errCode = match[3];
       const errMsg = match[4];
 
-      // Izvelk 3 rindu konteksta logu ap kļūdu
+      // Extract 3-line context window around the error
       const startIdx = Math.max(0, lineNum - 2);
       const endIdx = Math.min(codeLines.length, lineNum + 1);
       const snippet = codeLines.slice(startIdx, endIdx).join("\n");

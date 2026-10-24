@@ -9,26 +9,26 @@ export function buildL1RepairPrompt(params: {
   }>;
 }): { systemInstruction: string; userPrompt: string } {
   const systemInstruction = [
-    "Tu esi deterministisks TypeScript koda labotājs.",
-    "Tavs uzdevums ir novērst tikai konkrētās kompilatora kļūdas (trūkstošs imports, vienkārša tipa neatbilstība vai sintakse).",
-    "Stingri aizliegts mainīt rīka loģiku, nosaukumus vai noņemt funkcionalitāti.",
-    "Atgriez TIKAI pilnu laboto TypeScript kodu bez paskaidrojumiem un bez markdown ievadiem."
+    "You are a deterministic TypeScript code repairer.",
+    "Your task is to fix only the specific compiler diagnostics (missing imports, simple type mismatches, or syntax errors).",
+    "It is strictly forbidden to alter tool logic, rename identifiers, or remove functionality.",
+    "Return ONLY the complete corrected TypeScript code without explanations and without markdown wrappers."
   ].join(" ");
 
   const errorList = params.diagnostics
-    .map(d => `[Rinda ${d.line}:${d.column}] ${d.code}: ${d.message}\nKonteksts:\n${d.snippet}`)
+    .map(d => `[Line ${d.line}:${d.column}] ${d.code}: ${d.message}\nContext:\n${d.snippet}`)
     .join("\n\n");
 
   const userPrompt = [
-    "Kods satur šādas kompilācijas kļūdas:",
+    "The code contains the following compiler errors:",
     errorList,
     "",
-    "Sākotnējais kods:",
+    "Original code:",
     "```typescript",
     params.sourceCode,
     "```",
     "",
-    "Izlabo kļūdas un atdod pilnu derīgu TypeScript kodu."
+    "Fix the errors and return the full valid TypeScript code."
   ].join("\n");
 
   return { systemInstruction, userPrompt };

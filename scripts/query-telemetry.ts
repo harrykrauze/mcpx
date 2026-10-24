@@ -1,10 +1,10 @@
 /**
  * scripts/query-telemetry.ts
  * 
- * Cloudflare Workers Analytics Engine SQL Vaicājumu un Telemetrijas Analīzes Rīks.
- * Nolasa un vizualizē mcpx_telemetry datu kopas metriku, veiktspēju un incidentus.
+ * Cloudflare Workers Analytics Engine SQL Query and Telemetry Analysis Tool.
+ * Queries and visualizes mcpx_telemetry dataset metrics, latency, and incidents.
  * 
- * Izsaukums:
+ * Usage:
  *   npx tsx scripts/query-telemetry.ts [--window 24h] [--tenant <id>] [--tool <name>] [--errors] [--limit 50]
  */
 
@@ -81,25 +81,25 @@ function printHelp() {
 mcpx Telemetry SQL Query Tool (Cloudflare Analytics Engine)
 ===========================================================
 
-Lietošana:
-  npm run telemetry:query -- [OPCIJAS]
-  vai:
-  npx tsx scripts/query-telemetry.ts [OPCIJAS]
+Usage:
+  npm run telemetry:query -- [OPTIONS]
+  or:
+  npx tsx scripts/query-telemetry.ts [OPTIONS]
 
-Opcijas:
-  --window, -w <logs>   Laika logs (noklusējums: '24h'):
-                        Pieejamās vērtības: '1h', '6h', '24h', '7d'
-  --tenant, -t <id>     Filtrēt konkrēta nomnieka / lietotāja pieprasījumus
-  --tool <nosaukums>    Filtrēt konkrēta MCP rīka izsaukumus (piem., evaluate_fraud_transaction)
-  --errors, -e          Rādīt tikai kļūdas un incidentus (HTTP >= 400 vai status != 'success')
-  --limit, -l <skaits>  Ierobežot rindu skaitu detalizētajā sarakstā (noklusējums: 50)
-  --account <id>        Pārrakstīt CLOUDFLARE_ACCOUNT_ID
-  --token <token>       Pārrakstīt CLOUDFLARE_API_TOKEN
-  --help, -h            Parādīt šo palīdzības paziņojumu
+Options:
+  --window, -w <window> Time window (default: '24h'):
+                        Available values: '1h', '6h', '24h', '7d'
+  --tenant, -t <id>     Filter requests by specific tenant / user ID
+  --tool <name>         Filter requests by specific MCP tool (e.g., evaluate_fraud_transaction)
+  --errors, -e          Show only errors and incidents (HTTP >= 400 or status != 'success')
+  --limit, -l <count>   Limit number of rows in detailed log table (default: 50)
+  --account <id>        Override CLOUDFLARE_ACCOUNT_ID
+  --token <token>       Override CLOUDFLARE_API_TOKEN
+  --help, -h            Display this help message
 
-Nepieciešamie vides mainīgie (.env vai Wrangler sesija):
-  CLOUDFLARE_ACCOUNT_ID=<32_simbolu_account_id>
-  CLOUDFLARE_API_TOKEN=<cloudflare_api_token_ar_analytics_read_tiesibam>
+Required environment variables (.env or Wrangler session):
+  CLOUDFLARE_ACCOUNT_ID=<32_character_account_id>
+  CLOUDFLARE_API_TOKEN=<cloudflare_api_token_with_analytics_read_permissions>
 `);
 }
 
@@ -123,7 +123,7 @@ function getInterval(windowStr: string): string {
   }
 }
 
-// ANSI krāsu kodi terminālim
+// ANSI color codes for terminal
 const C = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
@@ -150,7 +150,7 @@ async function resolveCredentials(args: CliArgs): Promise<{ accountId: string; a
   let accountId = args.accountId || process.env.CLOUDFLARE_ACCOUNT_ID;
   let apiToken = args.apiToken || process.env.CLOUDFLARE_API_TOKEN;
 
-  // Ja trūkst kāda vērtība, mēģinām nolasīt no lokālās Wrangler konfigurācijas
+  // If missing, attempt reading from local Wrangler configuration
   if (!accountId || !apiToken) {
     try {
       const tomlPath = path.join(os.homedir(), "AppData", "Roaming", "xdg.config", ".wrangler", "config", "default.toml");
@@ -163,7 +163,7 @@ async function resolveCredentials(args: CliArgs): Promise<{ accountId: string; a
           }
 
           if (!accountId) {
-            // Izgūstam account_id caur Cloudflare API izmantojot tokenu
+            // Retrieve account_id via Cloudflare API using the token
             const accRes = await fetch("https://api.cloudflare.com/client/v4/accounts", {
               headers: { Authorization: `Bearer ${apiToken}` },
             });
@@ -177,23 +177,23 @@ async function resolveCredentials(args: CliArgs): Promise<{ accountId: string; a
         }
       }
     } catch {
-      // Ignorē lasīšanas kļūdu un turpina uz validācijas pārbaudi zemāk
+      // Ignore read error and proceed to validation check below
     }
   }
 
   if (!accountId || !apiToken) {
     console.error(`
-${C.red}${C.bold}[KĻŪDA: Trūkst Cloudflare akreditācijas datu]${C.reset}
+${C.red}${C.bold}[ERROR: Missing Cloudflare credentials]${C.reset}
 
-Lai veiktu SQL vaicājumus pret Analytics Engine, nepieciešams norādīt Cloudflare konta ID un API tokenu:
-  1. Iestatiet .env failā:
-     ${C.cyan}CLOUDFLARE_ACCOUNT_ID${C.reset}=<jūsu_32_simbolu_account_id>
-     ${C.cyan}CLOUDFLARE_API_TOKEN${C.reset}=<api_token_ar_analytics_read_tiesibam>
+To execute SQL queries against Analytics Engine, specify Cloudflare Account ID and API token:
+  1. Set in .env file:
+     ${C.cyan}CLOUDFLARE_ACCOUNT_ID${C.reset}=<your_32_character_account_id>
+     ${C.cyan}CLOUDFLARE_API_TOKEN${C.reset}=<api_token_with_analytics_read_permissions>
 
-  2. Vai nododiet kā CLI parametrus:
+  2. Or pass via CLI parameters:
      npm run telemetry:query -- --account <id> --token <token>
 
-Tokena ģenerēšana: Cloudflare Dashboard -> My Profile -> API Tokens -> Create Token -> Read Analytics Engine.
+Token generation: Cloudflare Dashboard -> My Profile -> API Tokens -> Create Token -> Read Analytics Engine.
 `);
     process.exit(1);
   }
@@ -226,9 +226,9 @@ async function executeSql(
         parsedMessage = parsed.errors.map((e: any) => e.message || JSON.stringify(e)).join("; ");
       }
     } catch {
-      // Izmanto raw text
+      // Use raw text
     }
-    throw new Error(`Cloudflare Analytics Engine SQL API kļūda (HTTP ${res.status}): ${parsedMessage}`);
+    throw new Error(`Cloudflare Analytics Engine SQL API error (HTTP ${res.status}): ${parsedMessage}`);
   }
 
   const json = (await res.json()) as any;
@@ -241,11 +241,11 @@ function sanitizeLiteral(val: string): string {
 
 function renderTable(headers: string[], rows: string[][]): void {
   if (rows.length === 0) {
-    console.log(`${C.dim}  (Nav datu)${C.reset}`);
+    console.log(`${C.dim}  (No data)${C.reset}`);
     return;
   }
 
-  // Aprēķina katras kolonnas maksimālo platumu
+  // Calculate maximum column widths
   const colWidths = headers.map((h, i) => {
     let max = h.length;
     for (const r of rows) {
@@ -300,16 +300,16 @@ async function main() {
   const whereClause = conditions.join(" AND ");
 
   console.log(`\n${C.bold}================================================================${C.reset}`);
-  console.log(`${C.bold}  MCPX CLOUDFLARE ANALYTICS ENGINE TELEMETRIJAS PĀRSKATS        ${C.reset}`);
-  console.log(`  Laika logs:      ${C.cyan}${args.window}${C.reset} (${interval})`);
-  console.log(`  Nomnieka filtrs: ${args.tenant ? C.cyan + args.tenant + C.reset : C.dim + "Visi" + C.reset}`);
-  console.log(`  Rīka filtrs:     ${args.tool ? C.cyan + args.tool + C.reset : C.dim + "Visi" + C.reset}`);
-  console.log(`  Kļūdu filtrs:    ${args.errorsOnly ? C.red + "TIKAI KĻŪDAS" + C.reset : C.dim + "Visi izsaukumi" + C.reset}`);
-  console.log(`  Laika zīmogs:    ${new Date().toISOString()}`);
+  console.log(`${C.bold}  MCPX CLOUDFLARE ANALYTICS ENGINE TELEMETRY REPORT             ${C.reset}`);
+  console.log(`  Time Window:     ${C.cyan}${args.window}${C.reset} (${interval})`);
+  console.log(`  Tenant Filter:   ${args.tenant ? C.cyan + args.tenant + C.reset : C.dim + "All" + C.reset}`);
+  console.log(`  Tool Filter:     ${args.tool ? C.cyan + args.tool + C.reset : C.dim + "All" + C.reset}`);
+  console.log(`  Error Filter:    ${args.errorsOnly ? C.red + "ERRORS ONLY" + C.reset : C.dim + "All calls" + C.reset}`);
+  console.log(`  Timestamp:       ${new Date().toISOString()}`);
   console.log(`${C.bold}================================================================${C.reset}\n`);
 
   try {
-    // 1. Kopsavilkums (Summary KPI)
+    // 1. Summary KPI
     const summarySql = `
       SELECT 
         count() AS total_requests,
@@ -330,7 +330,7 @@ async function main() {
       success_rate_pct: 100,
     };
 
-    // 2. Detalizēts izsaukumu saraksts (lai deterministiski aprēķinātu arī p95 veiktspēju)
+    // 2. Detailed calls list (for deterministic p95 latency calculation)
     const detailSql = `
       SELECT 
         timestamp,
@@ -350,7 +350,7 @@ async function main() {
 
     const detailData = await executeSql(accountId, apiToken, detailSql);
 
-    // Deterministisks p95 aprēķins no ielādētajiem ierakstiem (No Head Math)
+    // Deterministic p95 calculation from loaded records (No Head Math)
     let p95Ms = Number(kpi.max_duration_ms) || 0;
     if (detailData.length > 0) {
       const durations = detailData.map((d: any) => Number(d.ms) || 0).sort((a: number, b: number) => a - b);
@@ -358,16 +358,16 @@ async function main() {
       p95Ms = durations[p95Idx];
     }
 
-    console.log(`${C.bold}1. KOPSAVILKUMA METRIKA (Executive KPI):${C.reset}`);
+    console.log(`${C.bold}1. EXECUTIVE KPI SUMMARY:${C.reset}`);
     const rateColor = Number(kpi.success_rate_pct) >= 99 ? C.green : Number(kpi.success_rate_pct) >= 90 ? C.yellow : C.red;
-    console.log(`  * Kopējie pieprasījumi:    ${C.bold}${kpi.total_requests}${C.reset}`);
-    console.log(`  * Vidējais izpildes laiks: ${C.bold}${kpi.avg_duration_ms} ms${C.reset}`);
-    console.log(`  * p95 izpildes laiks:      ${C.bold}${p95Ms} ms${C.reset}`);
-    console.log(`  * Maksimālais izp. laiks:  ${C.bold}${kpi.max_duration_ms} ms${C.reset}`);
-    console.log(`  * Kļūdu / incidentu skaits:${Number(kpi.error_count) > 0 ? C.red : C.green} ${kpi.error_count}${C.reset}`);
-    console.log(`  * Veiksmīguma rādītājs:    ${rateColor}${kpi.success_rate_pct}%${C.reset}\n`);
+    console.log(`  * Total Requests:        ${C.bold}${kpi.total_requests}${C.reset}`);
+    console.log(`  * Average Latency:       ${C.bold}${kpi.avg_duration_ms} ms${C.reset}`);
+    console.log(`  * p95 Latency:           ${C.bold}${p95Ms} ms${C.reset}`);
+    console.log(`  * Maximum Latency:       ${C.bold}${kpi.max_duration_ms} ms${C.reset}`);
+    console.log(`  * Error / Incident Count:${Number(kpi.error_count) > 0 ? C.red : C.green} ${kpi.error_count}${C.reset}`);
+    console.log(`  * Success Rate:          ${rateColor}${kpi.success_rate_pct}%${C.reset}\n`);
 
-    // 3. Sadalījums pa Nomniekiem (Tenant Breakdown)
+    // 3. Breakdown by Tenant
     const tenantSql = `
       SELECT 
         blob1 AS tenant_id,
@@ -383,7 +383,7 @@ async function main() {
     `;
 
     const tenantData = await executeSql(accountId, apiToken, tenantSql);
-    console.log(`${C.bold}2. SADALĪJUMS PA NOMNIEKIEM (Top Tenants):${C.reset}`);
+    console.log(`${C.bold}2. BREAKDOWN BY TENANT (Top Tenants):${C.reset}`);
     const tenantRows = tenantData.map((t: any) => [
       String(t.tenant_id || "anonymous"),
       String(t.req_count),
@@ -391,10 +391,10 @@ async function main() {
       `${t.avg_ms} ms`,
       `${t.max_ms} ms`,
     ]);
-    renderTable(["Nomnieks (tenantId)", "Pieprasījumi", "Kļūdas", "Vid. ms", "Maks. ms"], tenantRows);
+    renderTable(["Tenant (tenantId)", "Requests", "Errors", "Avg ms", "Max ms"], tenantRows);
     console.log("");
 
-    // 4. Sadalījums pa Metodēm un Rīkiem (Method & Tool Breakdown)
+    // 4. Breakdown by Method and Tool
     const methodSql = `
       SELECT 
         blob2 AS method,
@@ -410,7 +410,7 @@ async function main() {
     `;
 
     const methodData = await executeSql(accountId, apiToken, methodSql);
-    console.log(`${C.bold}3. SADALĪJUMS PA METODĒM UN RĪKIEM:${C.reset}`);
+    console.log(`${C.bold}3. BREAKDOWN BY METHOD AND TOOL:${C.reset}`);
     const methodRows = methodData.map((m: any) => [
       String(m.method),
       String(m.tool_name),
@@ -418,11 +418,11 @@ async function main() {
       Number(m.errors) > 0 ? `${C.red}${m.errors}${C.reset}` : `${C.green}0${C.reset}`,
       `${m.avg_ms} ms`,
     ]);
-    renderTable(["Metode", "Rīka Nosaukums", "Izsaukumi", "Kļūdas", "Vid. ms"], methodRows);
+    renderTable(["Method", "Tool Name", "Calls", "Errors", "Avg ms"], methodRows);
     console.log("");
 
-    // 5. Detalizēts pēdējo izsaukumu / incidentu saraksts (ierobežots ar args.limit)
-    console.log(`${C.bold}4. PĒDĒJIE IZSAUKUMI UN ŽURNĀLI (Limit: ${args.limit}):${C.reset}`);
+    // 5. Recent Calls & Logs (limited by args.limit)
+    console.log(`${C.bold}4. RECENT CALLS AND LOGS (Limit: ${args.limit}):${C.reset}`);
     const limitedDetails = detailData.slice(0, args.limit);
     const detailRows = limitedDetails.map((d: any) => [
       String(d.timestamp).slice(0, 19).replace("T", " "),
@@ -434,17 +434,17 @@ async function main() {
       `${d.ms} ms`,
       `${d.bytes} B`,
     ]);
-    renderTable(["Laiks (UTC)", "Nomnieks", "Metode", "Rīks", "Statuss (Kods)", "Klients", "Aizture", "Izmērs"], detailRows);
+    renderTable(["Time (UTC)", "Tenant", "Method", "Tool", "Status (Code)", "Client", "Latency", "Size"], detailRows);
 
-    console.log(`\n${C.green}[✓] Telemetrijas vaicājumi veiksmīgi izpildīti pret Cloudflare Analytics Engine SQL API.${C.reset}\n`);
+    console.log(`\n${C.green}[✓] Telemetry queries successfully executed against Cloudflare Analytics Engine SQL API.${C.reset}\n`);
   } catch (err: any) {
-    console.error(`\n${C.red}${C.bold}[KĻŪDA] Neizdevās iegūt telemetrijas datus:${C.reset}`);
+    console.error(`\n${C.red}${C.bold}[ERROR] Failed to retrieve telemetry data:${C.reset}`);
     console.error(`  ${err.message || String(err)}\n`);
     process.exit(1);
   }
 }
 
 main().catch((err) => {
-  console.error("Negaidīta kļūda:", err);
+  console.error("Unexpected error:", err);
   process.exit(1);
 });

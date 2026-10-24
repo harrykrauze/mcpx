@@ -1,17 +1,17 @@
 /**
  * scripts/test-x402-billing.ts
  * 
- * AHP GATE 3 (/test) — Sprint 3: x402 M2M Monetizācijas un Kredītu Bilances Verifikācijas Tests.
+ * AHP GATE 3 (/test) — Sprint 3: x402 M2M Monetization & Credit Balance Verification Test.
  * 
- * Verificē:
- *   [B.1] Atslēgas sagatavošana ar 3 centu bilanci (POST /keys/provision ar initialBalanceCents: 3)
- *   [B.2] Bezmaksas operācijas (tools/list -> 200 OK, bilance nemainās = 3 centi)
- *   [B.3] 1 centa rīks (evaluate_fraud_transaction -> 200 OK, bilance kļūst 2 centi)
- *   [B.4] 2 centu rīks (calculate_u_value_iso6946 -> 200 OK, bilance kļūst 0 centi, X-MCPX-Low-Balance: true)
- *   [B.5] x402 bloķēšana (analyze_jev_semantic_ast ar 0 bilanci -> HTTP 402 Payment Required, L402 galvenes)
- *   [B.6] Neautorizēta papildināšana (POST /keys/topup bez Master atslēgas -> HTTP 401 Unauthorized)
- *   [B.7] Master papildināšana (POST /keys/topup ar Master atslēgu par 500 centiem -> 200 OK, bilance = 500)
- *   [B.8] Izpildes atjaunošanās (generate_mcp_server ar maksu 5 centi -> 200 OK, bilance = 495)
+ * Verifies:
+ *   [B.1] Key provisioning with 3 cents initial balance (POST /keys/provision with initialBalanceCents: 3)
+ *   [B.2] Free operations (tools/list -> 200 OK, balance unchanged = 3 cents)
+ *   [B.3] 1 cent tool (evaluate_fraud_transaction -> 200 OK, balance becomes 2 cents)
+ *   [B.4] 2 cents tool (calculate_u_value_iso6946 -> 200 OK, balance becomes 0 cents, X-MCPX-Low-Balance: true)
+ *   [B.5] x402 interception (analyze_jev_semantic_ast with 0 balance -> HTTP 402 Payment Required, L402 headers)
+ *   [B.6] Unauthorized top-up (POST /keys/topup without Master key -> HTTP 401 Unauthorized)
+ *   [B.7] Master top-up (POST /keys/topup with Master key for 500 cents -> 200 OK, balance = 500)
+ *   [B.8] Execution resumption (generate_mcp_server with fee 5 cents -> 200 OK, balance = 495)
  */
 
 import dotenv from "dotenv";
@@ -46,16 +46,16 @@ async function runStep(
     results.push({ step: code, name, status: "PASS", details: details || undefined });
   } catch (err: any) {
     console.log("FAIL");
-    console.error(`       Kļūda: ${err.message || String(err)}`);
+    console.error(`       Error: ${err.message || String(err)}`);
     results.push({ step: code, name, status: "FAIL", error: err.message || String(err) });
   }
 }
 
 async function main() {
   console.log(`================================================================`);
-  console.log(`  AHP GATE 3: SPRINT 3 x402 M2M MONETIZĀCIJAS VERIFIKĀCIJA       `);
-  console.log(`  Mērķa vārteja: ${BASE_URL}`);
-  console.log(`  Laika zīmogs: ${new Date().toISOString()}`);
+  console.log(`  AHP GATE 3: SPRINT 3 x402 M2M MONETIZATION VERIFICATION        `);
+  console.log(`  Target Gateway: ${BASE_URL}`);
+  console.log(`  Timestamp: ${new Date().toISOString()}`);
   console.log(`================================================================\n`);
 
   const baseUrlClean = BASE_URL.replace(/\/+$/, "");
@@ -65,8 +65,8 @@ async function main() {
   let createdKeyId = "";
   const testTenant = `billing-test-${Math.floor(100000 + Math.random() * 900000)}`;
 
-  // [B.1] Atslēgas sagatavošana ar fiksētu 3 centu bilanci
-  await runStep("B.1", "Atslēgas sagatavošana (POST /keys/provision ar initialBalanceCents: 3)", async () => {
+  // [B.1] Key provisioning with fixed 3 cents balance
+  await runStep("B.1", "Key provisioning (POST /keys/provision with initialBalanceCents: 3)", async () => {
     const res = await fetch(`${baseUrlClean}/keys/provision`, {
       method: "POST",
       headers: {
@@ -84,26 +84,26 @@ async function main() {
 
     if (res.status !== 200) {
       const errText = await res.text();
-      throw new Error(`Neizdevās izveidot atslēgu (HTTP ${res.status}): ${errText}`);
+      throw new Error(`Failed to create key (HTTP ${res.status}): ${errText}`);
     }
 
     const data = (await res.json()) as any;
     if (!data.apiKey || !data.keyId) {
-      throw new Error("Trūkst apiKey vai keyId atbildē");
+      throw new Error("Missing apiKey or keyId in response");
     }
 
     createdApiKey = data.apiKey;
     createdKeyId = data.keyId;
 
     if (!data.billing || data.billing.balanceCents !== 3) {
-      throw new Error(`Gaidīta bilance 3 centi, saņemts: ${JSON.stringify(data.billing)}`);
+      throw new Error(`Expected balance 3 cents, received: ${JSON.stringify(data.billing)}`);
     }
 
-    return `Izveidota atslēga ${createdApiKey.slice(0, 14)}... ar keyId: ${createdKeyId} | Sākotnējā bilance: $${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} c)`;
+    return `Created key ${createdApiKey.slice(0, 14)}... with keyId: ${createdKeyId} | Initial balance: $${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} c)`;
   });
 
-  // [B.2] Bezmaksas operācijas (tools/list)
-  await runStep("B.2", "Bezmaksas operācijas (tools/list -> 200 OK, bilance nemainās = 3 c)", async () => {
+  // [B.2] Free operations (tools/list)
+  await runStep("B.2", "Free operations (tools/list -> 200 OK, balance unchanged = 3 c)", async () => {
     const listRes = await fetch(messageUrl, {
       method: "POST",
       headers: {
@@ -119,15 +119,15 @@ async function main() {
 
     if (listRes.status !== 200) {
       const errText = await listRes.text();
-      throw new Error(`tools/list kļūda (HTTP ${listRes.status}): ${errText}`);
+      throw new Error(`tools/list error (HTTP ${listRes.status}): ${errText}`);
     }
 
     const listData = (await listRes.json()) as any;
     if (!listData.result?.tools || !Array.isArray(listData.result.tools)) {
-      throw new Error(`tools/list neatgrieza derīgu rīku sarakstu: ${JSON.stringify(listData)}`);
+      throw new Error(`tools/list did not return a valid tools array: ${JSON.stringify(listData)}`);
     }
 
-    // Pārbaudām statusu un bilanci caur /keys/status
+    // Check status and balance via /keys/status
     const statusRes = await fetch(`${baseUrlClean}/keys/status`, {
       method: "GET",
       headers: {
@@ -136,19 +136,19 @@ async function main() {
     });
 
     if (statusRes.status !== 200) {
-      throw new Error(`GET /keys/status kļūda (HTTP ${statusRes.status})`);
+      throw new Error(`GET /keys/status error (HTTP ${statusRes.status})`);
     }
 
     const statusData = (await statusRes.json()) as any;
     if (statusData.billing?.balanceCents !== 3) {
-      throw new Error(`tools/list atskaitīja kredītus! Bilance ir ${statusData.billing?.balanceCents}, gaidīta 3`);
+      throw new Error(`tools/list deducted credits! Balance is ${statusData.billing?.balanceCents}, expected 3`);
     }
 
-    return `tools/list sekmīgs (pieejami ${listData.result.tools.length} rīki) | Bilance paliek nemainīga: $0.03 (3 c)`;
+    return `tools/list successful (${listData.result.tools.length} tools available) | Balance unchanged: $0.03 (3 c)`;
   });
 
-  // [B.3] 1 centa rīka izsaukums (evaluate_fraud_transaction)
-  await runStep("B.3", "1 centa rīks (evaluate_fraud_transaction -> 200 OK, bilance kļūst 2 c)", async () => {
+  // [B.3] 1 cent tool invocation (evaluate_fraud_transaction)
+  await runStep("B.3", "1 cent tool (evaluate_fraud_transaction -> 200 OK, balance becomes 2 c)", async () => {
     const callRes = await fetch(messageUrl, {
       method: "POST",
       headers: {
@@ -172,24 +172,24 @@ async function main() {
 
     if (callRes.status !== 200) {
       const errText = await callRes.text();
-      throw new Error(`tools/call kļūda (HTTP ${callRes.status}): ${errText}`);
+      throw new Error(`tools/call error (HTTP ${callRes.status}): ${errText}`);
     }
 
     const balanceHeader = callRes.headers.get("X-MCPX-Balance-Cents");
     if (balanceHeader !== "2") {
-      throw new Error(`Gaidīta galvene X-MCPX-Balance-Cents: 2, saņemts: '${balanceHeader}'`);
+      throw new Error(`Expected header X-MCPX-Balance-Cents: 2, received: '${balanceHeader}'`);
     }
 
     const callData = (await callRes.json()) as any;
     if (callData.error) {
-      throw new Error(`JSON-RPC kļūda: ${JSON.stringify(callData.error)}`);
+      throw new Error(`JSON-RPC error: ${JSON.stringify(callData.error)}`);
     }
 
-    return `evaluate_fraud_transaction izpildīts (maksa 1 c) | X-MCPX-Balance-Cents: ${balanceHeader}`;
+    return `evaluate_fraud_transaction executed (fee 1 c) | X-MCPX-Balance-Cents: ${balanceHeader}`;
   });
 
-  // [B.4] 2 centu rīka izsaukums (calculate_u_value_iso6946)
-  await runStep("B.4", "2 centu rīks (calculate_u_value_iso6946 -> 200 OK, bilance kļūst 0 c, Low-Balance)", async () => {
+  // [B.4] 2 cents tool invocation (calculate_u_value_iso6946)
+  await runStep("B.4", "2 cent tool (calculate_u_value_iso6946 -> 200 OK, balance becomes 0 c, Low-Balance)", async () => {
     const callRes = await fetch(messageUrl, {
       method: "POST",
       headers: {
@@ -215,25 +215,25 @@ async function main() {
 
     if (callRes.status !== 200) {
       const errText = await callRes.text();
-      throw new Error(`tools/call kļūda (HTTP ${callRes.status}): ${errText}`);
+      throw new Error(`tools/call error (HTTP ${callRes.status}): ${errText}`);
     }
 
     const balanceHeader = callRes.headers.get("X-MCPX-Balance-Cents");
     const lowBalanceHeader = callRes.headers.get("X-MCPX-Low-Balance");
 
     if (balanceHeader !== "0") {
-      throw new Error(`Gaidīta galvene X-MCPX-Balance-Cents: 0, saņemts: '${balanceHeader}'`);
+      throw new Error(`Expected header X-MCPX-Balance-Cents: 0, received: '${balanceHeader}'`);
     }
 
     if (lowBalanceHeader !== "true") {
-      throw new Error(`Gaidīta galvene X-MCPX-Low-Balance: true, saņemts: '${lowBalanceHeader}'`);
+      throw new Error(`Expected header X-MCPX-Low-Balance: true, received: '${lowBalanceHeader}'`);
     }
 
-    return `calculate_u_value_iso6946 izpildīts (maksa 2 c) | Bilance: 0 c | X-MCPX-Low-Balance: ${lowBalanceHeader}`;
+    return `calculate_u_value_iso6946 executed (fee 2 c) | Balance: 0 c | X-MCPX-Low-Balance: ${lowBalanceHeader}`;
   });
 
-  // [B.5] x402 bloķēšana pie 0 bilances (analyze_jev_semantic_ast)
-  await runStep("B.5", "x402 bloķēšana (analyze_jev_semantic_ast ar 0 bilanci -> HTTP 402, L402 galvenes)", async () => {
+  // [B.5] x402 interception on 0 balance (analyze_jev_semantic_ast)
+  await runStep("B.5", "x402 interception (analyze_jev_semantic_ast with 0 balance -> HTTP 402, L402 headers)", async () => {
     const callRes = await fetch(messageUrl, {
       method: "POST",
       headers: {
@@ -255,7 +255,7 @@ async function main() {
 
     if (callRes.status !== 402) {
       const body = await callRes.text();
-      throw new Error(`Gaidīts HTTP 402 Payment Required, saņemts ${callRes.status}: ${body}`);
+      throw new Error(`Expected HTTP 402 Payment Required, received ${callRes.status}: ${body}`);
     }
 
     const authHeader = callRes.headers.get("WWW-Authenticate") || "";
@@ -264,35 +264,35 @@ async function main() {
     const tenantHeader = callRes.headers.get("X-MCPX-Tenant");
 
     if (!authHeader.includes("L402") || !authHeader.includes("invoice=")) {
-      throw new Error(`Trūkst derīgas WWW-Authenticate L402 galvenes: '${authHeader}'`);
+      throw new Error(`Missing valid WWW-Authenticate L402 header: '${authHeader}'`);
     }
 
     if (balanceHeader !== "0") {
-      throw new Error(`Gaidīta X-MCPX-Balance-Cents: 0, saņemts: '${balanceHeader}'`);
+      throw new Error(`Expected X-MCPX-Balance-Cents: 0, received: '${balanceHeader}'`);
     }
 
     if (requiredHeader !== "1") {
-      throw new Error(`Gaidīta X-MCPX-Required-Cents: 1, saņemts: '${requiredHeader}'`);
+      throw new Error(`Expected X-MCPX-Required-Cents: 1, received: '${requiredHeader}'`);
     }
 
     if (tenantHeader !== testTenant) {
-      throw new Error(`Gaidīts X-MCPX-Tenant: ${testTenant}, saņemts: '${tenantHeader}'`);
+      throw new Error(`Expected X-MCPX-Tenant: ${testTenant}, received: '${tenantHeader}'`);
     }
 
     const json = (await callRes.json()) as any;
     if (json.error?.code !== 402) {
-      throw new Error(`Gaidīts JSON-RPC error.code 402, saņemts: ${JSON.stringify(json.error)}`);
+      throw new Error(`Expected JSON-RPC error.code 402, received: ${JSON.stringify(json.error)}`);
     }
 
-    return `Pārtverts HTTP 402 Payment Required | L402 invoice piesaistīts | code: ${json.error.code}`;
+    return `Intercepted HTTP 402 Payment Required | L402 invoice attached | code: ${json.error.code}`;
   });
 
-  // [B.6] Neautorizēta bilances papildināšana (POST /keys/topup bez Master)
-  await runStep("B.6", "Neautorizēta papildināšana (POST /keys/topup bez Master atslēgas -> HTTP 401)", async () => {
+  // [B.6] Unauthorized balance top-up (POST /keys/topup without Master key)
+  await runStep("B.6", "Unauthorized top-up (POST /keys/topup without Master key -> HTTP 401)", async () => {
     const topupRes = await fetch(`${baseUrlClean}/keys/topup`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${createdApiKey}`, // Nomnieka atslēga, nevis Master
+        "Authorization": `Bearer ${createdApiKey}`, // Tenant key, not Master
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -303,14 +303,14 @@ async function main() {
 
     if (topupRes.status !== 401 && topupRes.status !== 403) {
       const body = await topupRes.text();
-      throw new Error(`Gaidīts HTTP 401 vai 403, saņemts ${topupRes.status}: ${body}`);
+      throw new Error(`Expected HTTP 401 or 403, received ${topupRes.status}: ${body}`);
     }
 
-    return `Perimetra aizsardzība aktīva (HTTP ${topupRes.status} Unauthorized / Forbidden)`;
+    return `Perimeter protection active (HTTP ${topupRes.status} Unauthorized / Forbidden)`;
   });
 
-  // [B.7] Master kredītu papildināšana (POST /keys/topup ar Master)
-  await runStep("B.7", "Master papildināšana (POST /keys/topup par 500 centiem -> 200 OK, bilance = 500 c)", async () => {
+  // [B.7] Master credit top-up (POST /keys/topup with Master key)
+  await runStep("B.7", "Master top-up (POST /keys/topup for 500 cents -> 200 OK, balance = 500 c)", async () => {
     const topupRes = await fetch(`${baseUrlClean}/keys/topup`, {
       method: "POST",
       headers: {
@@ -326,19 +326,19 @@ async function main() {
 
     if (topupRes.status !== 200) {
       const errText = await topupRes.text();
-      throw new Error(`Topup neizdevās (HTTP ${topupRes.status}): ${errText}`);
+      throw new Error(`Topup failed (HTTP ${topupRes.status}): ${errText}`);
     }
 
     const data = (await topupRes.json()) as any;
     if (data.billing?.balanceCents !== 500) {
-      throw new Error(`Gaidīta bilance 500 centi, saņemts: ${data.billing?.balanceCents}`);
+      throw new Error(`Expected balance 500 cents, received: ${data.billing?.balanceCents}`);
     }
 
-    return `Papildināts par $${(data.addedCents / 100).toFixed(2)} (${data.addedCents} c) | Jaunā bilance: $${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} c)`;
+    return `Topped up by $${(data.addedCents / 100).toFixed(2)} (${data.addedCents} c) | New balance: $${(data.billing.balanceCents / 100).toFixed(2)} (${data.billing.balanceCents} c)`;
   });
 
-  // [B.8] Izpildes atjaunošanās ar maksas rīku (generate_mcp_server, maksa 5 centi)
-  await runStep("B.8", "Izpildes atjaunošanās (generate_mcp_server ar maksu 5 c -> 200 OK, bilance = 495 c)", async () => {
+  // [B.8] Resumed execution with paid tool (generate_mcp_server, fee 5 cents)
+  await runStep("B.8", "Execution resumption (generate_mcp_server with fee 5 c -> 200 OK, balance = 495 c)", async () => {
     const callRes = await fetch(messageUrl, {
       method: "POST",
       headers: {
@@ -360,23 +360,23 @@ async function main() {
 
     if (callRes.status !== 200) {
       const errText = await callRes.text();
-      throw new Error(`tools/call kļūda pēc papildināšanas (HTTP ${callRes.status}): ${errText}`);
+      throw new Error(`tools/call error after top-up (HTTP ${callRes.status}): ${errText}`);
     }
 
     const balanceHeader = callRes.headers.get("X-MCPX-Balance-Cents");
     if (balanceHeader !== "495") {
-      throw new Error(`Gaidīta galvene X-MCPX-Balance-Cents: 495, saņemts: '${balanceHeader}'`);
+      throw new Error(`Expected header X-MCPX-Balance-Cents: 495, received: '${balanceHeader}'`);
     }
 
     const callData = (await callRes.json()) as any;
     if (callData.error) {
-      throw new Error(`JSON-RPC kļūda: ${JSON.stringify(callData.error)}`);
+      throw new Error(`JSON-RPC error: ${JSON.stringify(callData.error)}`);
     }
 
-    return `generate_mcp_server veiksmīgi izpildīts (maksa 5 c) | Bilance: $${(Number(balanceHeader) / 100).toFixed(2)} (${balanceHeader} c)`;
+    return `generate_mcp_server successfully executed (fee 5 c) | Balance: $${(Number(balanceHeader) / 100).toFixed(2)} (${balanceHeader} c)`;
   });
 
-  // Sakopšana (Cleanup)
+  // Cleanup
   if (createdKeyId) {
     try {
       await fetch(`${baseUrlClean}/keys/${createdKeyId}`, {
@@ -386,29 +386,29 @@ async function main() {
         },
       });
     } catch {
-      // Ignorējam sakopšanas kļūdas
+      // Ignore cleanup errors
     }
   }
 
-  // Kopsavilkums
+  // Summary
   console.log(`\n================================================================`);
-  console.log(`                      TESTU KOPSAVILKUMS                        `);
+  console.log(`                       TEST SUMMARY                             `);
   console.log(`================================================================`);
   const passed = results.filter((r) => r.status === "PASS").length;
   const failed = results.filter((r) => r.status === "FAIL").length;
-  console.log(`Kopā soļi:    ${results.length}`);
-  console.log(`Veiksmīgi:    ${passed}`);
-  console.log(`Neveiksmīgi:  ${failed}\n`);
+  console.log(`Total steps:  ${results.length}`);
+  console.log(`Passed:       ${passed}`);
+  console.log(`Failed:       ${failed}\n`);
 
   if (failed > 0) {
-    console.error(`[VĀRTI SLĒGTI] ${failed} tests(-i) izgāzās!`);
+    console.error(`[GATE CLOSED] ${failed} test(s) failed!`);
     process.exit(1);
   } else {
-    console.log(`[VĀRTI ATVĒRTI] Visi x402 M2M monetizācijas un bilances testi sekmīgi izturēti!`);
+    console.log(`[GATE OPEN] All x402 M2M monetization and balance tests passed successfully!`);
   }
 }
 
 main().catch((err) => {
-  console.error("Kritiska kļūda testu izpildē:", err);
+  console.error("Critical error during test execution:", err);
   process.exit(1);
 });

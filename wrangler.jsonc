@@ -7,14 +7,14 @@
     "nodejs_compat"
   ],
 
-  // Publiskie vides mainīgie
+  // Public environment variables
   "vars": {
     "ENVIRONMENT": "production",
     "ISSUER_URL": "https://mcpx.harrykrauze.com",
     "RESOURCE_ID": "https://mcpx.harrykrauze.com/mcp/sse"
   },
 
-  // KV krātuve API atslēgām un bilancēm
+  // KV storage for API keys and balances
   "kv_namespaces": [
     {
       "binding": "MCPX_KEYS",
@@ -22,7 +22,7 @@
     }
   ],
 
-  // Telemetrijas un analītikas dzinējs
+  // Telemetry and analytics engine
   "analytics_engine_datasets": [
     {
       "binding": "ANALYTICS",
@@ -30,7 +30,7 @@
     }
   ],
 
-  // Pieprasījumu biežuma ierobežotājs (Rate limiter)
+  // Rate limiter
   "ratelimits": [
     {
       "name": "RATE_LIMITER",
@@ -42,7 +42,7 @@
     }
   ],
 
-  // Cron palaidēji (Cron Triggers)
+  // Cron triggers
   "triggers": {
     "crons": ["0 8 * * *"]
   }

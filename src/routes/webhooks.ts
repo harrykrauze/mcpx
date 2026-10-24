@@ -1,8 +1,8 @@
 /**
  * src/routes/webhooks.ts
  * 
- * Creem.io Webhook Vārtejas Apstrādātājs.
- * Nodrošina HMAC SHA-256 verifikāciju, KV idempotenci (7 dienas) un bilances atomāru papildināšanu USD/EUR centos.
+ * Creem.io Webhook Gateway Handler.
+ * Enforces HMAC SHA-256 verification, KV idempotency (7 days), and atomic credit top-ups in USD/EUR cents.
  */
 
 import { Env, ExecutionContext, recordTelemetry, ApiKeyRecord, computeKeyId } from "../auth";
@@ -33,7 +33,7 @@ export async function handleCreemWebhook(
     );
   }
 
-  // 1. Slepenās atslēgas esamības pārbaude
+  // 1. Verify secret presence
   const webhookSecret = env.CREEM_WEBHOOK_SECRET || process.env.CREEM_WEBHOOK_SECRET;
   if (!webhookSecret) {
     console.error("CREEM_WEBHOOK_SECRET is not configured.");
@@ -43,11 +43,11 @@ export async function handleCreemWebhook(
     );
   }
 
-  // 2. Neapstrādāta ķermeņa (raw body) nolasīšana precīzai HMAC verifikācijai
+  // 2. Read raw request body for exact cryptographic HMAC verification
   const rawBody = await request.text();
   const signatureHeader = request.headers.get("creem-signature") || request.headers.get("x-creem-signature");
 
-  // 3. Kriptogrāfiskā paraksta pārbaude
+  // 3. Verify cryptographic HMAC SHA-256 signature
   const isValidSignature = await verifyCreemSignature(rawBody, signatureHeader, webhookSecret);
   if (!isValidSignature) {
     const executionTimeMs = Date.now() - startTime;
@@ -68,7 +68,7 @@ export async function handleCreemWebhook(
     );
   }
 
-  // 4. JSON parsēšana un shēmas pārbaude
+  // 4. JSON parsing and schema validation
   let payload: CreemWebhookPayload;
   try {
     payload = JSON.parse(rawBody) as CreemWebhookPayload;
@@ -86,7 +86,7 @@ export async function handleCreemWebhook(
     );
   }
 
-  // Apstrādājam tikai 'checkout.completed' notikumus
+  // Process only 'checkout.completed' events
   if (payload.event !== "checkout.completed") {
     return new Response(
       JSON.stringify({
@@ -97,7 +97,7 @@ export async function handleCreemWebhook(
     );
   }
 
-  // Validējam summu un valūtu
+  // Validate amount and currency
   const amount = payload.data?.amount;
   if (typeof amount !== "number" || !Number.isInteger(amount) || amount <= 0) {
     return new Response(
@@ -120,7 +120,7 @@ export async function handleCreemWebhook(
     );
   }
 
-  // 5. Idempotences pārbaude (KV atslēga webhook:processed:${payload.id})
+  // 5. Idempotency check (KV key: webhook:processed:${payload.id})
   const idempotencyKey = `webhook:processed:${payload.id}`;
   const existingProcessed = await env.MCPX_KEYS.get(idempotencyKey, "text");
   if (existingProcessed) {
@@ -151,10 +151,10 @@ export async function handleCreemWebhook(
     }
   }
 
-  // 6. API atslēgas identifikācija:
-  // Prioritāte 1: custom_fields.key_id
-  // Prioritāte 2: metadata.keyId vai metadata.key_id
-  // Prioritāte 3: customer.email lookup
+  // 6. Target API key resolution:
+  // Priority 1: custom_fields.key_id
+  // Priority 2: metadata.keyId or metadata.key_id
+  // Priority 3: customer.email lookup
   const targetKeyId = (
     payload.data.custom_fields?.key_id ||
     payload.data.metadata?.keyId ||
@@ -167,7 +167,7 @@ export async function handleCreemWebhook(
   let actualKey: string | null = null;
   let rawRecord: string | null = null;
 
-  // A. Meklēšana pēc keyId
+  // A. Search by keyId
   if (targetKeyId) {
     const mappedKey = await env.MCPX_KEYS.get(`id:${targetKeyId}`, "text");
     if (mappedKey) {
@@ -197,14 +197,14 @@ export async function handleCreemWebhook(
               break;
             }
           } catch {
-            // Ignorēt
+            // Ignore corrupted entries
           }
         }
       }
     }
   }
 
-  // B. Lookup pēc customer.email (ja keyId nav vai netika atrasts)
+  // B. Lookup by customer.email (if keyId not present or not found)
   if (!rawRecord && customerEmail) {
     const emailMappedKey = await env.MCPX_KEYS.get(`email:${customerEmail}`, "text");
     if (emailMappedKey) {
@@ -229,7 +229,7 @@ export async function handleCreemWebhook(
               break;
             }
           } catch {
-            // Ignorēt
+            // Ignore corrupted entries
           }
         }
       }
@@ -246,7 +246,7 @@ export async function handleCreemWebhook(
     );
   }
 
-  // 7. Atomārā bilances papildināšana eirocentos
+  // 7. Atomic balance top-up in cents
   const record = JSON.parse(rawRecord.replace(/^\uFEFF/, "").trim()) as ApiKeyRecord;
   if (!record.billing) {
     record.billing = {
@@ -263,10 +263,10 @@ export async function handleCreemWebhook(
   record.billing.balanceCents += amount;
   record.billing.lastTopupAt = new Date().toISOString();
 
-  // Saglabājam atjaunoto atslēgas ierakstu
+  // Save updated key record
   await env.MCPX_KEYS.put(`key:${actualKey}`, JSON.stringify(record));
 
-  // 8. Saglabājam idempotences atslēgu ar TTL 7 dienas (604800 sek.)
+  // 8. Persist idempotency key with 7-day TTL (604,800 sec)
   const resolvedKeyId = record.keyId || targetKeyId || (await computeKeyId(actualKey));
   const resolvedTenantId = record.tenantId || record.userId;
   const tenantId = resolvedTenantId;
@@ -287,31 +287,31 @@ export async function handleCreemWebhook(
     { expirationTtl: 604800 }
   );
 
-  // 9. Reāllaika telemetrija: Cloudflare Analytics Engine (dataset: mcpx_telemetry)
+  // 9. Real-time telemetry: Cloudflare Analytics Engine (dataset: mcpx_telemetry)
   if (env.ANALYTICS) {
     try {
       env.ANALYTICS.writeDataPoint({
         blobs: [
-          "creem.topup",                         // blob1: Notikuma tips
+          "creem.topup",                         // blob1: Event type
           tenantId || "unknown",                 // blob2: Tenant ID
           keyId || "unknown",                    // blob3: Key ID / Hash
-          payload.data?.currency || "USD",       // blob4: Valūta
-          orderId || payload.data?.id || "",     // blob5: Pasūtījuma ID
-          payload.id                             // blob6: Creem notikuma ID
+          payload.data?.currency || "USD",       // blob4: Currency
+          orderId || payload.data?.id || "",     // blob5: Order ID
+          payload.id                             // blob6: Creem event ID
         ],
         doubles: [
-          addedCents,                            // double1: Pievienotie centi (piem., 2500)
-          addedCents / 100,                      // double2: Summa USD (piem., 25.00)
-          newBalanceCents                        // double3: Jaunā kopējā bilance centos
+          addedCents,                            // double1: Added cents (e.g., 2500)
+          addedCents / 100,                      // double2: Amount USD (e.g., 25.00)
+          newBalanceCents                        // double3: New total balance in cents
         ],
-        indexes: [tenantId || keyId || "mcpx"]  // index1: Ātrai filtrēšanai pēc klienta
+        indexes: [tenantId || keyId || "mcpx"]  // index1: Client filter index
       });
     } catch (analyticsErr) {
-      console.warn("Neizdevās reģistrēt Analytics Engine telemetriju:", analyticsErr);
+      console.warn("Failed to record Analytics Engine telemetry:", analyticsErr);
     }
   }
 
-  // 10. Asinhronā telemetrija: creem_fiat_topup
+  // 10. Asynchronous telemetry: creem_fiat_topup
   const executionTimeMs = Date.now() - startTime;
   recordTelemetry(env, ctx, {
     tenantId: resolvedTenantId,
