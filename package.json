@@ -43,6 +43,7 @@
     "test:domain-tools": "tsx scripts/test-domain-tools.ts",
     "test:x402-billing": "tsx scripts/test-x402-billing.ts",
     "telemetry:query": "tsx scripts/query-telemetry.ts",
+    "metrics": "tsx scripts/telemetry-metrics.ts",
     "key:provision": "tsx scripts/provision-key.ts",
     "key:list": "tsx scripts/manage-keys.ts --action list",
     "key:revoke": "tsx scripts/manage-keys.ts --action revoke",
