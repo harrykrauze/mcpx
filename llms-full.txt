@@ -1,0 +1,165 @@
+# mcpx gateway — Full Specification & JSON-RPC Protocol
+
+## 1. Protocol Architecture
+- Protocol: Model Context Protocol (MCP) over JSON-RPC 2.0 (HTTP POST / SSE)
+- Transport: HTTPS / Server-Sent Events
+- Base URL: `https://mcpx.harrykrauze.com/mcp/sse`
+- REST Endpoint: `https://mcpx.harrykrauze.com/tools/execute`
+- Auth Header: `Authorization: Bearer mcpx_live_<token>`
+
+## 2. Discovery Methods (Free Tier: $0.00 / 0 credits)
+
+### 2.1 Handshake (`initialize`)
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {},
+    "clientInfo": { "name": "AgentClient", "version": "1.0.0" }
+  }
+}
+```
+
+Response:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": { "tools": {} },
+    "serverInfo": {
+      "name": "mcpx-gateway",
+      "version": "1.0.0",
+      "runtime": "cloudflare-workers-v8"
+    }
+  }
+}
+```
+
+### 2.2 Tool Inspection (`tools/list`)
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/list",
+  "params": {}
+}
+```
+
+Response:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "tools": [
+      {
+        "name": "analyze_jev_semantic_ast",
+        "description": "Static AST analyzer that detects dangerous globals (process, fetch, prototype pollution) and code injection vectors.",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "code": { "type": "string" }, "filename": { "type": "string" } },
+          "required": ["code"]
+        },
+        "x-pricing-tier": "read",
+        "x-credit-cost": 1
+      },
+      {
+        "name": "evaluate_fraud_transaction",
+        "description": "Deterministic transaction scoring and fraud anomaly classification in real time (~210ms).",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "amount": { "type": "number" }, "currency": { "type": "string" }, "ipCountry": { "type": "string" } },
+          "required": ["amount"]
+        },
+        "x-pricing-tier": "compute",
+        "x-credit-cost": 1
+      },
+      {
+        "name": "calculate_u_value_iso6946",
+        "description": "Certified EN ISO 6946 thermal transmittance, total resistance, and condensation risk calculation (~140ms).",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "layers": { "type": "array" }, "r_si": { "type": "number" }, "r_se": { "type": "number" } },
+          "required": ["layers"]
+        },
+        "x-pricing-tier": "compute",
+        "x-credit-cost": 2
+      },
+      {
+        "name": "generate_mcp_server",
+        "description": "Dynamic TypeScript and FastMCP server code compilation and remote schema generation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "serverName": { "type": "string" }, "tools": { "type": "array" } },
+          "required": ["serverName"]
+        },
+        "x-pricing-tier": "sandbox",
+        "x-credit-cost": 5
+      }
+    ]
+  }
+}
+```
+
+## 3. Tool Invocation & Billing Handshake (`tools/call`)
+
+Request:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "calculate_u_value_iso6946",
+    "arguments": { "layers": [{ "name": "Concrete", "thickness": 0.2, "lambda": 1.7 }] }
+  }
+}
+```
+
+### 3.1 Success Response (200 OK)
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "content": [{ "type": "text", "text": "{\"uValue\": 2.85, \"rTotal\": 0.35, \"status\": \"compliant\"}" }],
+    "meta": {
+      "creditsDeducted": 2,
+      "remainingCredits": 48
+    }
+  }
+}
+```
+
+### 3.2 HTTP 402 Payment Required Error Schema
+
+When bearer key credits are below tool cost:
+
+```http
+HTTP/1.1 402 Payment Required
+Content-Type: application/json
+WWW-Authenticate: L402 token="...", invoice="..."
+X-Credits-Required: 2
+X-Credits-Available: 0
+```
+
+```json
+{
+  "error": "Payment Required",
+  "code": 402,
+  "message": "Insufficient credits for tool execution.",
+  "details": {
+    "tool": "calculate_u_value_iso6946",
+    "requiredCredits": 2,
+    "availableCredits": 0,
+    "topUpUrl": "https://mcpx.harrykrauze.com/#pricing"
+  }
+}
+```

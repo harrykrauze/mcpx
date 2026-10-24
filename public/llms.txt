@@ -1,60 +1,35 @@
-# mcpx — Model Context Protocol Gateway & Generation Engine
+# mcpx gateway
 
-> High-performance, deterministic Model Context Protocol (MCP) server generator and secure remote SSE execution gateway.
+> Deterministic Model Context Protocol (MCP) Edge Gateway with native x402 machine billing.
+> Hosted on Cloudflare Workers V8 Mesh with sub-250ms deterministic execution.
 
-## Overview
-- **Domain:** `https://mcpx.harrykrauze.com`
-- **Protocol:** Model Context Protocol (MCP 2024-11-05+), RFC 9728 (OAuth Protected Resource Metadata), RFC 8414 (OAuth Authorization Server Metadata), RFC 7591 (Dynamic Client Registration).
-- **Core Engine:** TypeScript 5.8 / 7.0, Gemini 2.5 / 3.8 Flash, Node.js / Cloudflare Workers runtime.
-- **Security Posture:** Strict SSRF blocking (RFC 1918, Link-local, Cloud metadata, Loopback, IPv6 ULA/Link-local), Origin lock, Rate limiting (10 req/min), Zero-trust token validation (iss, aud, exp with 30s clock skew).
+## System Overview
+mcpx bridges autonomous LLM agents and edge tooling via isolated V8 execution environments. It meters compute usage deterministically through native HTTP 402 protocols and bearer keys (`mcpx_live_...`).
 
-## Discovery & OAuth 2.1 Endpoints
-- `GET /.well-known/oauth-protected-resource`: RFC 9728 resource metadata pointing to SSE endpoint and authorization servers.
-- `GET /.well-known/oauth-authorization-server`: RFC 8414 server metadata with grant types, token endpoints, and supported scopes.
-- `GET /.well-known/jwks.json`: RFC 7517 JSON Web Key Set endpoint.
-- `GET /health`: Public health check with system uptime and provider status.
-- `GET /llms.txt`: This machine-readable specification.
+## x402 Pricing Matrix (Ladder of Trust)
+| Operation Tier | MCP Methods / Scope | Rate (USD) | Credit Cost | Trust Tier |
+| :--- | :--- | :--- | :--- | :--- |
+| Discovery | `tools/list`, `initialize`, `/llms.txt` | $0.00 | 0 credits | Discovery Free Tier |
+| Tier 1: AST Security | `analyze_jev_semantic_ast` | $0.01 | 1 credit | Agent Work Session |
+| Tier 1: Fraud Risk | `evaluate_fraud_transaction` | $0.01 | 1 credit | Real-time Decisioning |
+| Tier 2: Physics | `calculate_u_value_iso6946` | $0.02 | 2 credits | ISO Standards Engine |
+| Tier 3: Compiler | `generate_mcp_server` | $0.05 | 5 credits | Full Synthesis Cycle |
 
-## Core Services
-- `POST /api/generate`: Protected MCP server code generation from OpenAPI specs, cURL snippets, or JSON schemas.
-  - Required Header: `Authorization: Bearer <JWT>` or `X-API-Key: <SCOPED_KEY>`
-  - Required Scope: `mcp:generate`
-  - Rate Limit: 10 req/min (HTTP 429 with `Retry-After: 60`)
-- `GET /mcp/sse`: Remote MCP Server-Sent Events stream for agent connections.
-  - Required Scope: `mcp:connect`
-  - Headers: `X-Accel-Buffering: no`, `Cache-Control: no-cache, no-transform`
-- `POST /mcp/messages?sessionId={id}`: Remote MCP JSON-RPC message delivery with tenant isolation.
+## Gateway Endpoints
+- MCP Remote SSE Endpoint: `GET https://mcpx.harrykrauze.com/mcp/sse`
+- Direct REST Execution: `POST https://mcpx.harrykrauze.com/tools/execute`
+- Balance Verification: `POST https://mcpx.harrykrauze.com/keys/verify`
+- Full Schema Specification: `https://mcpx.harrykrauze.com/llms-full.txt`
+- Interactive Terminal: `https://mcpx.harrykrauze.com/`
 
-## Tool Capabilities
-- `calculate_u_value_iso6946`: Deterministic building physics thermal transmittance (U-value) and total thermal resistance (R_tot) calculator according to EN ISO 6946. Supports directional surface resistances (horizontal walls, upward roofs/ceilings, downward floors), multi-layer resistance breakdown, and interstitial condensation risk analysis.
-- `analyze_jev_semantic_ast`: Advanced static code analysis and AST injection scanning using Jev rules. Detects prototype pollution (__proto__, setPrototypeOf), dynamic execution (eval, Function), system process access (process.env, child_process), and network/SSRF vectors (fetch, sockets) with standard or paranoid strictness.
-- `generate_mcp_server`: Transforms API snippets into executable TypeScript (@modelcontextprotocol/sdk) or Python (FastMCP with stateless_http=True) MCP servers.
-- `evaluate_fraud_transaction`: Real-time risk scoring and transaction policy evaluation tool.
+## Authentication & Billing Protocol
+1. Pass bearer token: `Authorization: Bearer mcpx_live_<token>`
+2. Free discovery calls (`tools/list`, `initialize`, `/llms.txt`) require zero balance and deduct 0 credits.
+3. If balance is insufficient for Tier 1–3 tools, the gateway emits `HTTP 402 Payment Required` with `WWW-Authenticate: L402` and top-up checkout metadata.
 
-## M2M Monetization & x402 Protocol
-- Discovery operations are 100% free of charge (0 EUR): `tools/list`, `initialize`, `notifications/initialized`, `ping`, `/health`, `/llms.txt`, `/.well-known/*`.
-- Per-call metering matrix:
-  - `evaluate_fraud_transaction`: 1 cent (€0.01)
-  - `analyze_jev_semantic_ast`: 1 cent (€0.01)
-  - `calculate_u_value_iso6946`: 2 cents (€0.02)
-  - `generate_mcp_server`: 5 cents (€0.05)
-  - `POST /api/generate`: 5 cents (€0.05)
-- Credit exhaustion response:
-  - Returns `HTTP 402 Payment Required` with L402 challenge header:
-    `WWW-Authenticate: L402 token="mcpx", invoice="https://mcpx.harrykrauze.com/billing/topup?tenant={tenantId}"`
-  - Headers: `X-MCPX-Tenant`, `X-MCPX-Balance-Cents`, `X-MCPX-Required-Cents`.
-  - JSON-RPC error code: `402`.
-  - Warning header: `X-MCPX-Low-Balance: true` when remaining balance < 50 cents.
-- Balance topup: Programmatic credit topup via `POST /keys/topup` authenticated with `MCPX_MASTER_KEY`.
+## Client Integration (Claude Desktop, Claude Code & Cursor)
 
-## Client Integration (Claude Code & Cursor)
-
-### Claude Code (CLI)
-```bash
-claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <MCPX_API_KEY>"
-```
-
-### Cursor IDE (.cursor/mcp.json)
+### Claude Desktop (claude_desktop_config.json)
 ```json
 {
   "mcpServers": {
@@ -66,4 +41,24 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
     }
   }
 }
+```
+
+### Cursor IDE (.cursor/mcp.json)
+```json
+{
+  "mcpServers": {
+    "mcpx": {
+      "type": "sse",
+      "url": "https://mcpx.harrykrauze.com/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCPX_API_KEY"
+      }
+    }
+  }
+}
+```
+
+### Claude Code (CLI)
+```bash
+claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <MCPX_API_KEY>"
 ```

@@ -15,6 +15,90 @@ export function renderDashboardHtml(health: HealthStatus): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>mcpx | Autonomous Edge MCP Gateway</title>
+  <link rel="llms-txt" href="https://mcpx.harrykrauze.com/llms.txt">
+  <link rel="llms-full-txt" href="https://mcpx.harrykrauze.com/llms-full.txt">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://mcpx.harrykrauze.com/#software",
+        "name": "mcpx gateway",
+        "alternateName": "mcpx Deterministic MCP Edge Gateway",
+        "url": "https://mcpx.harrykrauze.com/",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Cloudflare Workers V8 Mesh",
+        "description": "Deterministic Model Context Protocol (MCP) Edge Gateway with native x402 machine billing, AST syntax parsing, and isolated V8 sandbox execution.",
+        "creator": {
+          "@type": "Person",
+          "@id": "https://harrykrauze.com/#person",
+          "name": "Harry Krauze",
+          "url": "https://harrykrauze.com/"
+        },
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Discovery Free Tier",
+            "description": "tools/list, initialize, /llms.txt",
+            "price": "0.00",
+            "priceCurrency": "USD"
+          },
+          {
+            "@type": "Offer",
+            "name": "AST Security Check",
+            "description": "analyze_jev_semantic_ast (1 credit)",
+            "price": "0.01",
+            "priceCurrency": "USD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Fraud Risk Scoring",
+            "description": "evaluate_fraud_transaction (1 credit)",
+            "price": "0.01",
+            "priceCurrency": "USD"
+          },
+          {
+            "@type": "Offer",
+            "name": "Building Physics ISO 6946",
+            "description": "calculate_u_value_iso6946 (2 credits)",
+            "price": "0.02",
+            "priceCurrency": "USD"
+          },
+          {
+            "@type": "Offer",
+            "name": "FastMCP Server Generator",
+            "description": "generate_mcp_server (5 credits)",
+            "price": "0.05",
+            "priceCurrency": "USD"
+          }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://mcpx.harrykrauze.com/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is mcpx gateway?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "mcpx is a deterministic Model Context Protocol (MCP) Edge Gateway deployed on the Cloudflare V8 Mesh with native x402 machine-to-machine billing and isolated sandbox execution."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does x402 machine billing work?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "mcpx uses a deterministic Ladder of Trust credit matrix: discovery operations are free ($0.00), lightweight security/fraud checks cost $0.01 (1 credit), building physics ISO 6946 calculations cost $0.02 (2 credits), and MCP server code generation costs $0.05 (5 credits)."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
   <style>
     :root {
       --bg: #0a0b0e;
@@ -270,6 +354,19 @@ export function renderDashboardHtml(health: HealthStatus): string {
         </tbody>
       </table>
     </div>
+
+    <section style="max-width: 820px; margin: 3rem auto 0 auto; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border); padding-top: 2rem;" aria-label="Architecture Overview">
+      <h2 style="color: #fff; font-size: 1.1rem; font-weight: 600; margin-bottom: 0.75rem;">Deterministic MCP Edge Runtime</h2>
+      <p style="line-height: 1.6; margin-bottom: 1rem;">
+        mcpx provides low-latency Model Context Protocol tool execution for autonomous AI workflows running inside Cloudflare V8 isolates. Metered via native HTTP 402 protocols, it eliminates unmonetized agent crawling while keeping discovery endpoints completely free.
+      </p>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; font-family: monospace; font-size: 0.75rem; color: #64748b;">
+        <div>Runtime: Cloudflare V8 Mesh</div>
+        <div>Protocol: MCP JSON-RPC 2.0 / SSE</div>
+        <div>Settlement: Bearer Keys + Creem.io</div>
+        <div>Discovery: /llms.txt (0 Credits)</div>
+      </div>
+    </section>
 
     <footer>
       <div class="footer-left">

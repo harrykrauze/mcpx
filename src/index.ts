@@ -32,14 +32,249 @@ import { handleCreemWebhook } from "./routes/webhooks";
 import { renderDashboardHtml, HealthStatus } from "./views/dashboard";
 
 export type { Env, ExecutionContext, TelemetryPoint, HealthStatus, ScheduledController, LowBalanceRecord, DailyAuditSummary };
-export { detectClientType, recordTelemetry, renderDashboardHtml, TOOL_ALIASES, resolveCanonicalToolName };
+export { detectClientType, recordTelemetry, renderDashboardHtml, TOOL_ALIASES, resolveCanonicalToolName, LLMS_TXT_CONTENT, LLMS_FULL_TXT_CONTENT };
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id, X-Master-Key",
-  "Access-Control-Expose-Headers": "WWW-Authenticate, X-MCPX-Tenant, X-MCPX-Balance-Cents, X-MCPX-Required-Cents, X-MCPX-Low-Balance",
+  "Access-Control-Expose-Headers": "WWW-Authenticate, X-MCPX-Tenant, X-MCPX-Balance-Cents, X-MCPX-Required-Cents, X-MCPX-Low-Balance, Link, X-MCP-Discovery",
+  "Link": '<https://mcpx.harrykrauze.com/llms.txt>; rel="llms-txt", <https://mcpx.harrykrauze.com/llms-full.txt>; rel="llms-full-txt"',
+  "X-MCP-Discovery": "https://mcpx.harrykrauze.com/mcp/sse",
 };
+
+const LLMS_TXT_CONTENT = `# mcpx gateway
+
+> Deterministic Model Context Protocol (MCP) Edge Gateway with native x402 machine billing.
+> Hosted on Cloudflare Workers V8 Mesh with sub-250ms deterministic execution.
+
+## System Overview
+mcpx bridges autonomous LLM agents and edge tooling via isolated V8 execution environments. It meters compute usage deterministically through native HTTP 402 protocols and bearer keys (\`mcpx_live_...\`).
+
+## x402 Pricing Matrix (Ladder of Trust)
+| Operation Tier | MCP Methods / Scope | Rate (USD) | Credit Cost | Trust Tier |
+| :--- | :--- | :--- | :--- | :--- |
+| Discovery | \`tools/list\`, \`initialize\`, \`/llms.txt\` | \$0.00 | 0 credits | Discovery Free Tier |
+| Tier 1: AST Security | \`analyze_jev_semantic_ast\` | \$0.01 | 1 credit | Agent Work Session |
+| Tier 1: Fraud Risk | \`evaluate_fraud_transaction\` | \$0.01 | 1 credit | Real-time Decisioning |
+| Tier 2: Physics | \`calculate_u_value_iso6946\` | \$0.02 | 2 credits | ISO Standards Engine |
+| Tier 3: Compiler | \`generate_mcp_server\` | \$0.05 | 5 credits | Full Synthesis Cycle |
+
+## Gateway Endpoints
+- MCP Remote SSE Endpoint: \`GET https://mcpx.harrykrauze.com/mcp/sse\`
+- Direct REST Execution: \`POST https://mcpx.harrykrauze.com/tools/execute\`
+- Balance Verification: \`POST https://mcpx.harrykrauze.com/keys/verify\`
+- Full Schema Specification: \`https://mcpx.harrykrauze.com/llms-full.txt\`
+- Interactive Terminal: \`https://mcpx.harrykrauze.com/\`
+
+## Authentication & Billing Protocol
+1. Pass bearer token: \`Authorization: Bearer mcpx_live_<token>\`
+2. Free discovery calls (\`tools/list\`, \`initialize\`, \`/llms.txt\`) require zero balance and deduct 0 credits.
+3. If balance is insufficient for Tier 1–3 tools, the gateway emits \`HTTP 402 Payment Required\` with \`WWW-Authenticate: L402\` and top-up checkout metadata.
+
+## Client Integration (Claude Desktop, Claude Code & Cursor)
+
+### Claude Desktop (claude_desktop_config.json)
+\`\`\`json
+{
+  "mcpServers": {
+    "mcpx": {
+      "url": "https://mcpx.harrykrauze.com/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCPX_API_KEY"
+      }
+    }
+  }
+}
+\`\`\`
+
+### Cursor IDE (.cursor/mcp.json)
+\`\`\`json
+{
+  "mcpServers": {
+    "mcpx": {
+      "type": "sse",
+      "url": "https://mcpx.harrykrauze.com/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCPX_API_KEY"
+      }
+    }
+  }
+}
+\`\`\`
+
+### Claude Code (CLI)
+\`\`\`bash
+claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <MCPX_API_KEY>"
+\`\`\`
+`;
+
+const LLMS_FULL_TXT_CONTENT = `# mcpx gateway — Full Specification & JSON-RPC Protocol
+
+## 1. Protocol Architecture
+- Protocol: Model Context Protocol (MCP) over JSON-RPC 2.0 (HTTP POST / SSE)
+- Transport: HTTPS / Server-Sent Events
+- Base URL: \`https://mcpx.harrykrauze.com/mcp/sse\`
+- REST Endpoint: \`https://mcpx.harrykrauze.com/tools/execute\`
+- Auth Header: \`Authorization: Bearer mcpx_live_<token>\`
+
+## 2. Discovery Methods (Free Tier: \$0.00 / 0 credits)
+
+### 2.1 Handshake (\`initialize\`)
+Request:
+\`\`\`json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {},
+    "clientInfo": { "name": "AgentClient", "version": "1.0.0" }
+  }
+}
+\`\`\`
+
+Response:
+\`\`\`json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": { "tools": {} },
+    "serverInfo": {
+      "name": "mcpx-gateway",
+      "version": "1.0.0",
+      "runtime": "cloudflare-workers-v8"
+    }
+  }
+}
+\`\`\`
+
+### 2.2 Tool Inspection (\`tools/list\`)
+Request:
+\`\`\`json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/list",
+  "params": {}
+}
+\`\`\`
+
+Response:
+\`\`\`json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "tools": [
+      {
+        "name": "analyze_jev_semantic_ast",
+        "description": "Static AST analyzer that detects dangerous globals (process, fetch, prototype pollution) and code injection vectors.",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "code": { "type": "string" }, "filename": { "type": "string" } },
+          "required": ["code"]
+        },
+        "x-pricing-tier": "read",
+        "x-credit-cost": 1
+      },
+      {
+        "name": "evaluate_fraud_transaction",
+        "description": "Deterministic transaction scoring and fraud anomaly classification in real time (~210ms).",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "amount": { "type": "number" }, "currency": { "type": "string" }, "ipCountry": { "type": "string" } },
+          "required": ["amount"]
+        },
+        "x-pricing-tier": "compute",
+        "x-credit-cost": 1
+      },
+      {
+        "name": "calculate_u_value_iso6946",
+        "description": "Certified EN ISO 6946 thermal transmittance, total resistance, and condensation risk calculation (~140ms).",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "layers": { "type": "array" }, "r_si": { "type": "number" }, "r_se": { "type": "number" } },
+          "required": ["layers"]
+        },
+        "x-pricing-tier": "compute",
+        "x-credit-cost": 2
+      },
+      {
+        "name": "generate_mcp_server",
+        "description": "Dynamic TypeScript and FastMCP server code compilation and remote schema generation.",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "serverName": { "type": "string" }, "tools": { "type": "array" } },
+          "required": ["serverName"]
+        },
+        "x-pricing-tier": "sandbox",
+        "x-credit-cost": 5
+      }
+    ]
+  }
+}
+\`\`\`
+
+## 3. Tool Invocation & Billing Handshake (\`tools/call\`)
+
+Request:
+\`\`\`json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "tools/call",
+  "params": {
+    "name": "calculate_u_value_iso6946",
+    "arguments": { "layers": [{ "name": "Concrete", "thickness": 0.2, "lambda": 1.7 }] }
+  }
+}
+\`\`\`
+
+### 3.1 Success Response (200 OK)
+\`\`\`json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "content": [{ "type": "text", "text": "{\\"uValue\\": 2.85, \\"rTotal\\": 0.35, \\"status\\": \\"compliant\\"}" }],
+    "meta": {
+      "creditsDeducted": 2,
+      "remainingCredits": 48
+    }
+  }
+}
+\`\`\`
+
+### 3.2 HTTP 402 Payment Required Error Schema
+
+When bearer key credits are below tool cost:
+
+\`\`\`http
+HTTP/1.1 402 Payment Required
+Content-Type: application/json
+WWW-Authenticate: L402 token="...", invoice="..."
+X-Credits-Required: 2
+X-Credits-Available: 0
+\`\`\`
+
+\`\`\`json
+{
+  "error": "Payment Required",
+  "code": 402,
+  "message": "Insufficient credits for tool execution.",
+  "details": {
+    "tool": "calculate_u_value_iso6946",
+    "requiredCredits": 2,
+    "availableCredits": 0,
+    "topUpUrl": "https://mcpx.harrykrauze.com/#pricing"
+  }
+}
+\`\`\`
+`;
 
 export function getToolCostCents(toolName: string): number {
   const canonical = resolveCanonicalToolName(toolName);
@@ -311,7 +546,58 @@ export default {
       return new Response(null, { headers: CORS_HEADERS });
     }
 
-    // 1. Public health check and Midnight Gourmet Dashboard route
+    // 1. Content negotiation on root for autonomous LLM agents
+    if (url.pathname === "/") {
+      const accept = request.headers.get("Accept") || "";
+      if (accept.includes("text/markdown") && !accept.includes("text/html")) {
+        return track(
+          new Response(LLMS_TXT_CONTENT, {
+            status: 200,
+            headers: {
+              "Content-Type": "text/markdown; charset=utf-8",
+              "Vary": "Accept",
+              "Cache-Control": "public, max-age=3600",
+              ...CORS_HEADERS,
+            },
+          }),
+          { method: "llms_markdown_negotiated", status: "success" }
+        );
+      }
+    }
+
+    // 1b. Direct /llms.txt route
+    if (url.pathname === "/llms.txt") {
+      return track(
+        new Response(LLMS_TXT_CONTENT, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/markdown; charset=utf-8",
+            "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+            ...CORS_HEADERS,
+            "Link": '<https://mcpx.harrykrauze.com/llms-full.txt>; rel="llms-full-txt"',
+          },
+        }),
+        { method: "llms.txt", status: "success" }
+      );
+    }
+
+    // 1c. Direct /llms-full.txt route
+    if (url.pathname === "/llms-full.txt") {
+      return track(
+        new Response(LLMS_FULL_TXT_CONTENT, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/markdown; charset=utf-8",
+            "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+            ...CORS_HEADERS,
+            "Link": '<https://mcpx.harrykrauze.com/llms.txt>; rel="llms-txt"',
+          },
+        }),
+        { method: "llms-full.txt", status: "success" }
+      );
+    }
+
+    // 1d. Public health check and Midnight Gourmet Dashboard route
     if (url.pathname === "/health" || (url.pathname === "/" && request.method === "GET")) {
       const healthData: HealthStatus = {
         status: "healthy",
@@ -349,169 +635,6 @@ export default {
           },
         }),
         { method: "health", status: "success" }
-      );
-    }
-
-    // 1b. Machine-readable specification for LLM agents (/llms.txt and /llms-full.txt)
-    if (url.pathname === "/llms.txt" || url.pathname === "/llms-full.txt") {
-      const isFull = url.pathname === "/llms-full.txt";
-      const baseLlms = `# mcpx — Model Context Protocol Gateway & Generation Engine
-
-> High-performance, deterministic Model Context Protocol (MCP) server generator and secure remote SSE execution gateway.
-
-## Overview
-- **Domain:** \`https://mcpx.harrykrauze.com\`
-- **Protocol:** Model Context Protocol (MCP 2024-11-05+), RFC 9728 (OAuth Protected Resource Metadata), RFC 8414 (OAuth Authorization Server Metadata), RFC 7591 (Dynamic Client Registration).
-- **Core Engine:** TypeScript 5.8 / 7.0, Gemini 2.5 / 3.8 Flash, Node.js / Cloudflare Workers runtime.
-- **Security Posture:** Strict SSRF blocking (RFC 1918, Link-local, Cloud metadata, Loopback, IPv6 ULA/Link-local), Origin lock, Rate limiting (10 req/min), Zero-trust token validation (iss, aud, exp with 30s clock skew).
-
-## Discovery & OAuth 2.1 Endpoints
-- \`GET /.well-known/oauth-protected-resource\`: RFC 9728 resource metadata pointing to SSE endpoint and authorization servers.
-- \`GET /.well-known/oauth-authorization-server\`: RFC 8414 server metadata with grant types, token endpoints, and supported scopes.
-- \`GET /.well-known/jwks.json\`: RFC 7517 JSON Web Key Set endpoint.
-- \`GET /health\`: Public health check with system uptime and provider status.
-- \`GET /llms.txt\`: Concise machine-readable specification.
-- \`GET /llms-full.txt\`: Comprehensive machine-readable specification with full schemas and examples.
-
-## Core Services
-- \`POST /api/generate\`: Protected MCP server code generation from OpenAPI specs, cURL snippets, or JSON schemas.
-  - Required Header: \`Authorization: Bearer <JWT>\` or \`X-API-Key: <SCOPED_KEY>\`
-  - Required Scope: \`mcp:generate\`
-  - Rate Limit: 10 req/min (HTTP 429 with \`Retry-After: 60\`)
-- \`GET /mcp/sse\`: Remote MCP Server-Sent Events stream for agent connections.
-  - Required Scope: \`mcp:connect\`
-  - Headers: \`X-Accel-Buffering: no\`, \`Cache-Control: no-cache, no-transform\`
-- \`POST /mcp/messages?sessionId={id}\`: Remote MCP JSON-RPC message delivery with tenant isolation.
-
-## Tool Capabilities
-- \`calculate_u_value_iso6946\`: Deterministic building physics thermal transmittance (U-value) and total thermal resistance (R_tot) calculator according to EN ISO 6946. Supports directional surface resistances (horizontal walls, upward roofs/ceilings, downward floors), multi-layer resistance breakdown, and interstitial condensation risk analysis.
-- \`analyze_jev_semantic_ast\`: Advanced static code analysis and AST injection scanning using Jev rules. Detects prototype pollution (__proto__, setPrototypeOf), dynamic execution (eval, Function), system process access (process.env, child_process), and network/SSRF vectors (fetch, sockets) with standard or paranoid strictness.
-- \`generate_mcp_server\`: Transforms API snippets into executable TypeScript (@modelcontextprotocol/sdk) or Python (FastMCP with stateless_http=True) MCP servers.
-- \`evaluate_fraud_transaction\`: Real-time risk scoring and transaction policy evaluation tool.
-
-## M2M Monetization & x402 Protocol
-- Discovery operations are 100% free of charge (\$0.00): \`tools/list\`, \`initialize\`, \`notifications/initialized\`, \`ping\`, \`/health\`, \`/llms.txt\`, \`/llms-full.txt\`, \`/.well-known/*\`.
-- Per-call metering matrix:
-  - \`evaluate_fraud_transaction\`: 1 cent (\$0.01)
-  - \`analyze_jev_semantic_ast\`: 1 cent (\$0.01)
-  - \`calculate_u_value_iso6946\`: 2 cents (\$0.02)
-  - \`generate_mcp_server\`: 5 cents (\$0.05)
-  - \`POST /api/generate\`: 5 cents (\$0.05)
-- Credit exhaustion response:
-  - Returns \`HTTP 402 Payment Required\` with L402 challenge header:
-    \`WWW-Authenticate: L402 token="mcpx", invoice="https://mcpx.harrykrauze.com/billing/topup?tenant={tenantId}"\`
-  - Headers: \`X-MCPX-Tenant\`, \`X-MCPX-Balance-Cents\`, \`X-MCPX-Required-Cents\`.
-  - JSON-RPC error code: \`402\`.
-  - Warning header: \`X-MCPX-Low-Balance: true\` when remaining balance < 10 cents.
-- Balance topup: Programmatic credit topup via \`POST /keys/topup\` authenticated with \`MCPX_MASTER_KEY\`, or fiat checkout via Creem.io (\`/webhooks/creem\`).
-
-## Client Integration (Claude Desktop & Cursor)
-
-### Claude Desktop (claude_desktop_config.json)
-\`\`\`json
-{
-  "mcpServers": {
-    "mcpx": {
-      "url": "https://mcpx.harrykrauze.com/mcp/sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_MCPX_API_KEY"
-      }
-    }
-  }
-}
-\`\`\`
-
-### Cursor IDE (.cursor/mcp.json)
-\`\`\`json
-{
-  "mcpServers": {
-    "mcpx": {
-      "type": "sse",
-      "url": "https://mcpx.harrykrauze.com/mcp/sse",
-      "headers": {
-        "Authorization": "Bearer YOUR_MCPX_API_KEY"
-      }
-    }
-  }
-}
-\`\`\`
-
-### Claude Code (CLI)
-\`\`\`bash
-claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <MCPX_API_KEY>"
-\`\`\`
-`;
-
-      const fullAdditions = `
-## Detailed Tool Input Schemas
-
-### 1. evaluate_fraud_transaction
-\`\`\`json
-{
-  "type": "object",
-  "properties": {
-    "amount": { "type": "number", "description": "Transaction amount in EUR/USD" },
-    "currency": { "type": "string", "description": "ISO currency code (e.g. EUR, USD)" },
-    "userRiskScore": { "type": "number", "description": "User risk score between 0 and 1" }
-  },
-  "required": ["amount", "currency"]
-}
-\`\`\`
-
-### 2. analyze_jev_semantic_ast
-\`\`\`json
-{
-  "type": "object",
-  "properties": {
-    "code": { "type": "string", "description": "JavaScript/TypeScript code to analyze" },
-    "strictness": { "type": "string", "enum": ["standard", "paranoid"], "default": "standard" }
-  },
-  "required": ["code"]
-}
-\`\`\`
-
-### 3. calculate_u_value_iso6946
-\`\`\`json
-{
-  "type": "object",
-  "properties": {
-    "direction": { "type": "string", "enum": ["horizontal", "upward", "downward"], "default": "horizontal" },
-    "layers": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "name": { "type": "string" },
-          "thicknessMeters": { "type": "number" },
-          "thermalConductivity": { "type": "number" },
-          "thermalResistance": { "type": "number" }
-        }
-      }
-    }
-  },
-  "required": ["layers"]
-}
-\`\`\`
-
-### 4. generate_mcp_server
-\`\`\`json
-{
-  "type": "object",
-  "properties": {
-    "prompt": { "type": "string", "description": "API specification, cURL, or OpenAPI schema" },
-    "framework": { "type": "string", "enum": ["typescript", "fastmcp"], "default": "typescript" }
-  },
-  "required": ["prompt"]
-}
-\`\`\`
-`;
-
-      const llmsContent = isFull ? baseLlms + fullAdditions : baseLlms;
-      return track(
-        new Response(llmsContent, {
-          headers: { "Content-Type": "text/markdown; charset=utf-8", ...CORS_HEADERS }
-        }),
-        { method: isFull ? "llms-full.txt" : "llms.txt", status: "success" }
       );
     }
 

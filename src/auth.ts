@@ -143,31 +143,36 @@ export function recordTelemetry(
   if (!env.ANALYTICS || typeof env.ANALYTICS.writeDataPoint !== "function") {
     return;
   }
-  ctx.waitUntil(
-    (async () => {
-      try {
-        const tenant = point.tenantId || "anonymous";
-        env.ANALYTICS!.writeDataPoint({
-          indexes: [tenant],
-          blobs: [
-            tenant,
-            point.method,
-            point.toolName || "none",
-            point.status,
-            point.clientType || "unknown",
-          ],
-          doubles: [
-            Math.max(0, Math.round(point.executionTimeMs)),
-            point.statusCode,
-            point.costCents !== undefined ? point.costCents : (point.payloadSizeBytes ?? 0),
-          ],
-        });
-      } catch (err) {
-        // Telemetry errors must not abort primary execution flow
-        console.error("Telemetry write failed:", err);
-      }
-    })()
-  );
+
+  const runTask = async () => {
+    try {
+      const tenant = point.tenantId || "anonymous";
+      env.ANALYTICS!.writeDataPoint({
+        indexes: [tenant],
+        blobs: [
+          tenant,
+          point.method,
+          point.toolName || "none",
+          point.status,
+          point.clientType || "unknown",
+        ],
+        doubles: [
+          Math.max(0, Math.round(point.executionTimeMs)),
+          point.statusCode,
+          point.costCents !== undefined ? point.costCents : (point.payloadSizeBytes ?? 0),
+        ],
+      });
+    } catch (err) {
+      // Telemetry errors must not abort primary execution flow
+      console.error("Telemetry write failed:", err);
+    }
+  };
+
+  if (ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(runTask());
+  } else {
+    runTask().catch(() => {});
+  }
 }
 
 export interface AuthContext {

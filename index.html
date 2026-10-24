@@ -3,37 +3,111 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MCP Server Generator: cURL & OpenAPI to MCP</title>
-    <meta name="description" content="Convert cURL commands, OpenAPI 3.0/3.1 specs, and API schemas into production-ready Model Context Protocol (MCP) servers with strict Zod/Pydantic validation." />
-    <meta property="og:title" content="MCP Server Generator: cURL & OpenAPI to MCP" />
-    <meta property="og:description" content="Convert cURL commands, OpenAPI 3.0/3.1 specs, and API schemas into production-ready Model Context Protocol (MCP) servers with strict Zod/Pydantic validation." />
+    <title>mcpx gateway | Deterministic Model Context Protocol Edge Gateway</title>
+    <meta name="description" content="Deterministic Model Context Protocol (MCP) Edge Gateway with native x402 machine billing, AST syntax parsing, and isolated V8 sandbox execution." />
+    <meta property="og:title" content="mcpx gateway | Deterministic MCP Edge Gateway" />
+    <meta property="og:description" content="Deterministic Model Context Protocol (MCP) Edge Gateway with native x402 machine billing, AST syntax parsing, and isolated V8 sandbox execution." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <link rel="llms-txt" href="https://mcpx.harrykrauze.com/llms.txt" />
+    <link rel="llms-full-txt" href="https://mcpx.harrykrauze.com/llms-full.txt" />
     <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
     {
-      "@context": "https://schema.org",
-      "@type": "WebApplication",
-      "name": "mcpx",
-      "url": "https://mcpx.harrykrauze.com",
-      "description": "Convert cURL commands, OpenAPI 3.0/3.1 specs, and API schemas into production-ready Model Context Protocol (MCP) servers with strict Zod/Pydantic validation and remote SSE execution.",
+      "@type": "SoftwareApplication",
+      "@id": "https://mcpx.harrykrauze.com/#software",
+      "name": "mcpx gateway",
+      "alternateName": "mcpx Deterministic MCP Edge Gateway",
+      "url": "https://mcpx.harrykrauze.com/",
       "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "All",
-      "offers": {
-        "@type": "Offer",
-        "price": "0"
+      "operatingSystem": "Cloudflare Workers V8 Mesh",
+      "description": "Deterministic Model Context Protocol (MCP) Edge Gateway with native x402 machine billing, AST syntax parsing, and isolated V8 sandbox execution.",
+      "creator": {
+        "@type": "Person",
+        "@id": "https://harrykrauze.com/#person",
+        "name": "Harry Krauze",
+        "url": "https://harrykrauze.com/"
       },
-      "featureList": [
-        "Model Context Protocol (MCP) Generation",
-        "OAuth 2.1 RFC 8414 & RFC 9728 Compliance",
-        "Deterministic SSRF Protection & Origin Lock",
-        "Remote SSE Transport Gateway"
+      "offers": [
+        {
+          "@type": "Offer",
+          "name": "Discovery Free Tier",
+          "description": "tools/list, initialize, /llms.txt",
+          "price": "0.00",
+          "priceCurrency": "USD"
+        },
+        {
+          "@type": "Offer",
+          "name": "AST Security Check",
+          "description": "analyze_jev_semantic_ast (1 credit)",
+          "price": "0.01",
+          "priceCurrency": "USD"
+        },
+        {
+          "@type": "Offer",
+          "name": "Fraud Risk Scoring",
+          "description": "evaluate_fraud_transaction (1 credit)",
+          "price": "0.01",
+          "priceCurrency": "USD"
+        },
+        {
+          "@type": "Offer",
+          "name": "Building Physics ISO 6946",
+          "description": "calculate_u_value_iso6946 (2 credits)",
+          "price": "0.02",
+          "priceCurrency": "USD"
+        },
+        {
+          "@type": "Offer",
+          "name": "FastMCP Server Generator",
+          "description": "generate_mcp_server (5 credits)",
+          "price": "0.05",
+          "priceCurrency": "USD"
+        }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://mcpx.harrykrauze.com/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is mcpx gateway?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "mcpx is a deterministic Model Context Protocol (MCP) Edge Gateway deployed on the Cloudflare V8 Mesh with native x402 machine-to-machine billing and isolated sandbox execution."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does x402 machine billing work?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "mcpx uses a deterministic Ladder of Trust credit matrix: discovery operations are free ($0.00), lightweight security/fraud checks cost $0.01 (1 credit), building physics ISO 6946 calculations cost $0.02 (2 credits), and MCP server code generation costs $0.05 (5 credits)."
+          }
+        }
       ]
     }
+  ]
+}
     </script>
   </head>
   <body>
     <div id="root"></div>
+    <section class="max-w-3xl mx-auto mt-12 text-zinc-400 text-sm border-t border-zinc-800 pt-8" aria-label="Architecture Overview">
+      <h2 class="text-white font-semibold mb-3">Deterministic MCP Edge Runtime</h2>
+      <p class="leading-relaxed mb-4">
+        mcpx provides low-latency Model Context Protocol tool execution for autonomous AI workflows running inside Cloudflare V8 isolates. Metered via native HTTP 402 protocols, it eliminates unmonetized agent crawling while keeping discovery endpoints completely free.
+      </p>
+      <div class="grid grid-cols-2 gap-4 text-xs font-mono text-zinc-500">
+        <div>Runtime: Cloudflare V8 Mesh</div>
+        <div>Protocol: MCP JSON-RPC 2.0 / SSE</div>
+        <div>Settlement: Bearer Keys + Creem.io</div>
+        <div>Discovery: /llms.txt (0 Credits)</div>
+      </div>
+    </section>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-
