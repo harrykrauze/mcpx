@@ -14,8 +14,12 @@ import { TypeSafeJevFilter } from "../core/jevFilter";
 
 export interface LayerInput {
   name: string;
-  thickness_m: number;
-  lambda_w_mk: number;
+  thickness_m?: number;
+  thickness?: number;
+  thicknessMeters?: number;
+  lambda_w_mk?: number;
+  lambda?: number;
+  thermalConductivity?: number;
 }
 
 export interface UValueCalculationInput {
@@ -67,14 +71,14 @@ export function calculateUValueIso6946(input: UValueCalculationInput): UValueCal
 
   for (let i = 0; i < input.layers.length; i++) {
     const l = input.layers[i];
-    const d = Number(l.thickness_m);
-    const lambda = Number(l.lambda_w_mk);
+    const d = Number(l.thickness_m ?? l.thickness ?? l.thicknessMeters);
+    const lambda = Number(l.lambda_w_mk ?? l.lambda ?? l.thermalConductivity);
 
     if (isNaN(d) || d <= 0) {
-      throw new Error(`Slānim #${i + 1} ('${l.name || "unnamed"}') biezumam 'thickness_m' jābūt pozitīvam skaitlim.`);
+      throw new Error(`Slānim #${i + 1} ('${l.name || "unnamed"}') biezumam 'thickness_m'/'thickness' jābūt pozitīvam skaitlim.`);
     }
     if (isNaN(lambda) || lambda <= 0) {
-      throw new Error(`Slānim #${i + 1} ('${l.name || "unnamed"}') siltumvadītspējai 'lambda_w_mk' jābūt pozitīvam skaitlim.`);
+      throw new Error(`Slānim #${i + 1} ('${l.name || "unnamed"}') siltumvadītspējai 'lambda_w_mk'/'lambda' jābūt pozitīvam skaitlim.`);
     }
 
     const r = d / lambda;
