@@ -252,9 +252,10 @@ export default {
       );
     }
 
-    // 1b. Mašīnlasāmā specifikācija LLM aģentiem (/llms.txt)
-    if (url.pathname === "/llms.txt") {
-      const llmsContent = `# mcpx — Model Context Protocol Gateway & Generation Engine
+    // 1b. Mašīnlasāmā specifikācija LLM aģentiem (/llms.txt un /llms-full.txt)
+    if (url.pathname === "/llms.txt" || url.pathname === "/llms-full.txt") {
+      const isFull = url.pathname === "/llms-full.txt";
+      const baseLlms = `# mcpx — Model Context Protocol Gateway & Generation Engine
 
 > High-performance, deterministic Model Context Protocol (MCP) server generator and secure remote SSE execution gateway.
 
@@ -269,7 +270,8 @@ export default {
 - \`GET /.well-known/oauth-authorization-server\`: RFC 8414 server metadata with grant types, token endpoints, and supported scopes.
 - \`GET /.well-known/jwks.json\`: RFC 7517 JSON Web Key Set endpoint.
 - \`GET /health\`: Public health check with system uptime and provider status.
-- \`GET /llms.txt\`: This machine-readable specification.
+- \`GET /llms.txt\`: Concise machine-readable specification.
+- \`GET /llms-full.txt\`: Comprehensive machine-readable specification with full schemas and examples.
 
 ## Core Services
 - \`POST /api/generate\`: Protected MCP server code generation from OpenAPI specs, cURL snippets, or JSON schemas.
@@ -288,7 +290,7 @@ export default {
 - \`evaluate_fraud_transaction\`: Real-time risk scoring and transaction policy evaluation tool.
 
 ## M2M Monetization & x402 Protocol
-- Discovery operations are 100% free of charge (\$0.00): \`tools/list\`, \`initialize\`, \`notifications/initialized\`, \`ping\`, \`/health\`, \`/llms.txt\`, \`/.well-known/*\`.
+- Discovery operations are 100% free of charge (\$0.00): \`tools/list\`, \`initialize\`, \`notifications/initialized\`, \`ping\`, \`/health\`, \`/llms.txt\`, \`/llms-full.txt\`, \`/.well-known/*\`.
 - Per-call metering matrix:
   - \`evaluate_fraud_transaction\`: 1 cent (\$0.01)
   - \`analyze_jev_semantic_ast\`: 1 cent (\$0.01)
@@ -301,16 +303,11 @@ export default {
   - Headers: \`X-MCPX-Tenant\`, \`X-MCPX-Balance-Cents\`, \`X-MCPX-Required-Cents\`.
   - JSON-RPC error code: \`402\`.
   - Warning header: \`X-MCPX-Low-Balance: true\` when remaining balance < 10 cents.
-- Balance topup: Programmatic credit topup via \`POST /keys/topup\` authenticated with \`MCPX_MASTER_KEY\`.
+- Balance topup: Programmatic credit topup via \`POST /keys/topup\` authenticated with \`MCPX_MASTER_KEY\`, or fiat checkout via Creem.io (\`/webhooks/creem\`).
 
-## Client Integration (Claude Code & Cursor)
+## Client Integration (Claude Desktop & Cursor)
 
-### Claude Code (CLI)
-\`\`\`bash
-claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <MCPX_API_KEY>"
-\`\`\`
-
-### Cursor IDE (.cursor/mcp.json)
+### Claude Desktop (claude_desktop_config.json)
 \`\`\`json
 {
   "mcpServers": {
@@ -323,12 +320,98 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
   }
 }
 \`\`\`
+
+### Cursor IDE (.cursor/mcp.json)
+\`\`\`json
+{
+  "mcpServers": {
+    "mcpx": {
+      "type": "sse",
+      "url": "https://mcpx.harrykrauze.com/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCPX_API_KEY"
+      }
+    }
+  }
+}
+\`\`\`
+
+### Claude Code (CLI)
+\`\`\`bash
+claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --header "Authorization: Bearer <MCPX_API_KEY>"
+\`\`\`
 `;
+
+      const fullAdditions = `
+## Detailed Tool Input Schemas
+
+### 1. evaluate_fraud_transaction
+\`\`\`json
+{
+  "type": "object",
+  "properties": {
+    "amount": { "type": "number", "description": "Transaction amount in EUR/USD" },
+    "currency": { "type": "string", "description": "ISO currency code (e.g. EUR, USD)" },
+    "userRiskScore": { "type": "number", "description": "User risk score between 0 and 1" }
+  },
+  "required": ["amount", "currency"]
+}
+\`\`\`
+
+### 2. analyze_jev_semantic_ast
+\`\`\`json
+{
+  "type": "object",
+  "properties": {
+    "code": { "type": "string", "description": "JavaScript/TypeScript code to analyze" },
+    "strictness": { "type": "string", "enum": ["standard", "paranoid"], "default": "standard" }
+  },
+  "required": ["code"]
+}
+\`\`\`
+
+### 3. calculate_u_value_iso6946
+\`\`\`json
+{
+  "type": "object",
+  "properties": {
+    "direction": { "type": "string", "enum": ["horizontal", "upward", "downward"], "default": "horizontal" },
+    "layers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "thicknessMeters": { "type": "number" },
+          "thermalConductivity": { "type": "number" },
+          "thermalResistance": { "type": "number" }
+        }
+      }
+    }
+  },
+  "required": ["layers"]
+}
+\`\`\`
+
+### 4. generate_mcp_server
+\`\`\`json
+{
+  "type": "object",
+  "properties": {
+    "prompt": { "type": "string", "description": "API specification, cURL, or OpenAPI schema" },
+    "framework": { "type": "string", "enum": ["typescript", "fastmcp"], "default": "typescript" }
+  },
+  "required": ["prompt"]
+}
+\`\`\`
+`;
+
+      const llmsContent = isFull ? baseLlms + fullAdditions : baseLlms;
       return track(
         new Response(llmsContent, {
           headers: { "Content-Type": "text/markdown; charset=utf-8", ...CORS_HEADERS }
         }),
-        { method: "llms.txt", status: "success" }
+        { method: isFull ? "llms-full.txt" : "llms.txt", status: "success" }
       );
     }
 

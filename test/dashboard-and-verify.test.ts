@@ -301,6 +301,52 @@ async function run() {
     }
   });
 
+  await testStep("GET /llms.txt atgriež mašīnlasāmu specifikāciju ar rīkiem un cenām", async () => {
+    const req = new Request("https://mcpx.harrykrauze.com/llms.txt", { method: "GET" });
+    const res = await workerDefault.fetch(req, env, ctx);
+    if (res.status !== 200) throw new Error(`Gaidīts 200, saņemts ${res.status}`);
+    const ct = res.headers.get("Content-Type") || "";
+    if (!ct.includes("text/markdown") && !ct.includes("text/plain")) {
+      throw new Error(`Gaidīts markdown vai plain saturs, saņemts: ${ct}`);
+    }
+    const text = await res.text();
+    if (!text.includes("evaluate_fraud_transaction") || !text.includes("analyze_jev_semantic_ast")) {
+      throw new Error("llms.txt nesatur pamata rīkus");
+    }
+    if (!text.includes("claude_desktop_config.json") || !text.includes(".cursor/mcp.json")) {
+      throw new Error("llms.txt nesatur klienta konfigurācijas profilus");
+    }
+  });
+
+  await testStep("GET /llms-full.txt atgriež paplašināto specifikāciju ar ievades shēmām", async () => {
+    const req = new Request("https://mcpx.harrykrauze.com/llms-full.txt", { method: "GET" });
+    const res = await workerDefault.fetch(req, env, ctx);
+    if (res.status !== 200) throw new Error(`Gaidīts 200, saņemts ${res.status}`);
+    const ct = res.headers.get("Content-Type") || "";
+    if (!ct.includes("text/markdown") && !ct.includes("text/plain")) {
+      throw new Error(`Gaidīts markdown vai plain saturs, saņemts: ${ct}`);
+    }
+    const text = await res.text();
+    if (!text.includes("Detailed Tool Input Schemas") || !text.includes("calculate_u_value_iso6946")) {
+      throw new Error("llms-full.txt nesatur detalizētās shēmas");
+    }
+  });
+
+  await testStep("GET /mcp/sse atgriež SSE straumi ar 'event: endpoint'", async () => {
+    const req = new Request("https://mcpx.harrykrauze.com/mcp/sse", {
+      method: "GET",
+      headers: { "Accept": "text/event-stream" },
+    });
+    const res = await workerDefault.fetch(req, env, ctx);
+    if (res.status !== 200) throw new Error(`Gaidīts 200, saņemts ${res.status}`);
+    const ct = res.headers.get("Content-Type") || "";
+    if (!ct.includes("text/event-stream")) throw new Error(`Gaidīts text/event-stream, saņemts ${ct}`);
+    const body = await res.text();
+    if (!body.includes("event: endpoint") || !body.includes("data: /message")) {
+      throw new Error(`Negaidīts SSE saturs: ${body}`);
+    }
+  });
+
   console.log(`\n================================================================`);
   console.log(`Rezultāts: ${pass} sekmīgi, ${fail} neveiksmīgi`);
   console.log(`================================================================`);
