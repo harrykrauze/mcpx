@@ -1,3 +1,4 @@
+// CLI utility to audit a local file against mcpx edge gateway
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, relative } from "node:path";
 
