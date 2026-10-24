@@ -48,6 +48,7 @@
     "key:revoke": "tsx scripts/manage-keys.ts --action revoke",
     "key:topup": "tsx scripts/manage-keys.ts --action topup",
     "check": "tsx scripts/check-file.ts",
+    "prepare": "git config core.hooksPath .githooks || true",
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",

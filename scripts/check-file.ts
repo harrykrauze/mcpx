@@ -100,11 +100,12 @@ async function main() {
     }
     console.log("------------------------------------------------------------");
 
-    if (result.valid === true || result.success === true) {
+    if (result.valid === true && (result.verdict === "SAFE" || result.success === true)) {
       console.log("\x1b[32m[PASS]\x1b[0m Sintakse un AST drošības struktūra ir korekta. Nav konstatēta koda injekcija.");
     } else {
-      console.log("\x1b[33m[BRĪDINĀJUMI / KĻŪDAS]:\x1b[0m");
+      console.log("\x1b[31m[NORAIDĪTS / BRĪDINĀJUMI]:\x1b[0m");
       console.log(JSON.stringify(result, null, 2));
+      process.exit(1);
     }
   } catch (err: any) {
     console.error(`\n\x1b[31m[TĪKLA KĻŪDA]\x1b[0m Neizdevās savienoties ar mcpx:`, err.message);
