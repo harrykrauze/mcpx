@@ -1624,11 +1624,12 @@ export default {
       );
     }
 
-    // 2. Processing and code generation route (/api/generate, /message, /mcp/messages, or POST /)
+    // 2. Processing and code generation route (/api/generate, /message, /mcp/messages, /mcp, or POST /)
     if (
       url.pathname === "/api/generate" ||
       url.pathname === "/message" ||
       url.pathname === "/mcp/messages" ||
+      url.pathname === "/mcp" ||
       (url.pathname === "/" && request.method === "POST")
     ) {
       const routeMethod = url.pathname === "/" ? "message" : url.pathname.replace(/^\//, "");
@@ -1683,22 +1684,65 @@ export default {
 
       // 2.2. Authorization check (KV or Master key)
       const auth = await requireAuth(request, env);
+
+      // Check if request is an unauthenticated Discovery Free Tier call (tools/list, initialize, ping)
+      let isDiscoveryMethod = false;
       if (!auth.authorized) {
-        const headers = new Headers(auth.response.headers);
-        for (const [k, v] of Object.entries(CORS_HEADERS)) {
-          headers.set(k, v);
-        }
+        try {
+          const peekBody = (await request.clone().json()) as any;
+          if (
+            peekBody &&
+            typeof peekBody === "object" &&
+            peekBody.jsonrpc === "2.0" &&
+            (peekBody.method === "tools/list" ||
+              peekBody.method === "initialize" ||
+              peekBody.method === "ping" ||
+              peekBody.method === "notifications/initialized")
+          ) {
+            isDiscoveryMethod = true;
+          }
+        } catch {}
+
         const isRevoked = (auth.response.headers.get("WWW-Authenticate") || "").includes("token_revoked");
-        return track(
-          new Response(auth.response.body, {
-            status: auth.response.status,
-            headers,
-          }),
-          { method: routeMethod, status: isRevoked ? "revoked" : "security_violation" }
-        );
+        if (isRevoked || !isDiscoveryMethod) {
+          const headers = new Headers(auth.response.headers);
+          for (const [k, v] of Object.entries(CORS_HEADERS)) {
+            headers.set(k, v);
+          }
+          return track(
+            new Response(auth.response.body, {
+              status: auth.response.status,
+              headers,
+            }),
+            { method: routeMethod, status: isRevoked ? "revoked" : "security_violation" }
+          );
+        }
       }
 
-      const { userId, plan, requestsLimit, tenantId } = auth.context;
+      const authResult = auth.authorized
+        ? auth
+        : {
+            authorized: true as const,
+            context: {
+              userId: "anonymous_discovery",
+              plan: "free" as const,
+              tenantId: "anonymous",
+              requestsLimit: undefined,
+              apiKey: undefined,
+              billing: {
+                balanceCents: 0,
+                totalSpentCents: 0,
+                mode: "prepaid" as const,
+                currency: "USD" as const,
+                costPerToolCallCents: 1,
+                costPerGenerateCents: 5,
+                lowBalanceThresholdCents: 10,
+              },
+              isMaster: false,
+            },
+          };
+
+      const { userId, plan, requestsLimit, tenantId } = authResult.context;
       const activeTenant = tenantId || userId;
 
       // 2.3. User quota check (if requestsLimit is defined)
@@ -1912,9 +1956,9 @@ export default {
 
             // x402 / L402 Credit check
             const cost = getToolCostCents(toolName);
-            if (auth.context.billing.mode !== "unlimited" && auth.context.billing.balanceCents < cost) {
+            if (authResult.context.billing.mode !== "unlimited" && authResult.context.billing.balanceCents < cost) {
               return track(
-                create402McpResponse(reqId, activeTenant, auth.context.billing.balanceCents, cost),
+                create402McpResponse(reqId, activeTenant, authResult.context.billing.balanceCents, cost),
                 { tenantId: activeTenant, method: "tools/call", toolName, status: "payment_required", costCents: 0 }
               );
             }
@@ -1922,8 +1966,8 @@ export default {
             // Atomic balance deduction
             const { balanceCents, lowBalance } = await deductCredits(
               env,
-              auth.context.apiKey,
-              auth.context.billing,
+              authResult.context.apiKey,
+              authResult.context.billing,
               cost
             );
             const billingHeaders: Record<string, string> = {
@@ -2148,9 +2192,9 @@ export default {
 
         // 2.5. Legacy HTTP POST specification generation
         const cost = 5;
-        if (auth.context.billing.mode !== "unlimited" && auth.context.billing.balanceCents < cost) {
+        if (authResult.context.billing.mode !== "unlimited" && authResult.context.billing.balanceCents < cost) {
           return track(
-            create402RestResponse(activeTenant, auth.context.billing.balanceCents, cost),
+            create402RestResponse(activeTenant, authResult.context.billing.balanceCents, cost),
             { tenantId: activeTenant, method: routeMethod, toolName: "generate_mcp_server", status: "payment_required", costCents: 0 }
           );
         }
@@ -2169,8 +2213,8 @@ export default {
 
         const { balanceCents, lowBalance } = await deductCredits(
           env,
-          auth.context.apiKey,
-          auth.context.billing,
+          authResult.context.apiKey,
+          authResult.context.billing,
           cost
         );
         const billingHeaders: Record<string, string> = {
