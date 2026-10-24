@@ -1519,6 +1519,7 @@ export default {
           new Response(
             JSON.stringify({
               success: true,
+              valid: record.status?.toLowerCase() === "active",
               keyId,
               tenantId: record.tenantId || record.userId,
               balanceCents,
