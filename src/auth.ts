@@ -83,6 +83,28 @@ export interface ExecutionContext {
   passThroughOnException(): void;
 }
 
+export interface ScheduledController {
+  scheduledTime: number;
+  cron: string;
+  noRetry?: () => void;
+}
+
+export interface LowBalanceRecord {
+  keyId: string;
+  tenantId: string;
+  balanceCents: number;
+}
+
+export interface DailyAuditSummary {
+  timestamp: string;
+  date: string;
+  previousDate: string;
+  totalActiveKeys: number;
+  lowBalanceCount: number;
+  lowBalanceKeys: LowBalanceRecord[];
+  status: "HEALTHY" | "DEGRADED";
+}
+
 export interface TelemetryPoint {
   tenantId?: string;
   method: string;

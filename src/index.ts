@@ -13,6 +13,9 @@ import {
   Env,
   ExecutionContext,
   TelemetryPoint,
+  ScheduledController,
+  LowBalanceRecord,
+  DailyAuditSummary,
   detectClientType,
   recordTelemetry,
 } from "./auth";
@@ -28,7 +31,7 @@ import {
 import { handleCreemWebhook } from "./routes/webhooks";
 import { renderDashboardHtml, HealthStatus } from "./views/dashboard";
 
-export type { Env, ExecutionContext, TelemetryPoint, HealthStatus };
+export type { Env, ExecutionContext, TelemetryPoint, HealthStatus, ScheduledController, LowBalanceRecord, DailyAuditSummary };
 export { detectClientType, recordTelemetry, renderDashboardHtml, TOOL_ALIASES, resolveCanonicalToolName };
 
 const CORS_HEADERS = {
@@ -153,6 +156,103 @@ export function create402McpResponse(
       },
     }
   );
+}
+
+export async function handleScheduled(
+  controller: ScheduledController,
+  env: Env,
+  ctx?: ExecutionContext
+): Promise<DailyAuditSummary> {
+  const scheduledTimestamp = controller?.scheduledTime || Date.now();
+  const todayDate = new Date(scheduledTimestamp).toISOString().slice(0, 10);
+  const yesterdayDate = new Date(scheduledTimestamp - 86400 * 1000).toISOString().slice(0, 10);
+
+  let totalActiveKeys = 0;
+  const lowBalanceKeys: LowBalanceRecord[] = [];
+
+  // b) Iziet cauri aktīvajām KV atslēgām (MCPX_KEYS.list({ prefix: "key:" }))
+  if (env.MCPX_KEYS) {
+    try {
+      let cursor: string | undefined = undefined;
+      do {
+        const listResult = await env.MCPX_KEYS.list({ prefix: "key:", limit: 1000, cursor });
+        for (const item of listResult.keys) {
+          const rawRecord = await env.MCPX_KEYS.get(item.name, "text");
+          if (!rawRecord) continue;
+          try {
+            const cleaned = rawRecord.replace(/^\uFEFF/, "").trim();
+            const record = JSON.parse(cleaned) as ApiKeyRecord;
+            if (record && record.status === "active") {
+              totalActiveKeys++;
+              const balanceCents = record.billing?.balanceCents ?? 0;
+              // c) Atlasa klientus, kuru bilance ir zem 100 centiem ($1.00 USD)
+              if (balanceCents < 100) {
+                const keyId = record.keyId || item.name.replace(/^key:/, "").slice(0, 16);
+                lowBalanceKeys.push({
+                  keyId,
+                  tenantId: record.tenantId || record.userId || "unknown",
+                  balanceCents,
+                });
+              }
+            }
+          } catch {
+            // Ignorē atsevišķu nederīgu ierakstu parsēšanas kļūdas
+          }
+        }
+        cursor = listResult.list_complete ? undefined : listResult.cursor;
+      } while (cursor);
+    } catch (err) {
+      console.error("KV key list failed in scheduled audit:", err);
+    }
+  }
+
+  const summary: DailyAuditSummary = {
+    timestamp: new Date(scheduledTimestamp).toISOString(),
+    date: todayDate,
+    previousDate: yesterdayDate,
+    totalActiveKeys,
+    lowBalanceCount: lowBalanceKeys.length,
+    lowBalanceKeys,
+    status: "HEALTHY",
+  };
+
+  // d) Ieraksta dienas audita kopsavilkumu KV ierakstā stats:daily:${date} ar TTL 30 dienas
+  if (env.MCPX_KEYS) {
+    try {
+      await env.MCPX_KEYS.put(
+        `stats:daily:${todayDate}`,
+        JSON.stringify(summary, null, 2),
+        { expirationTtl: 30 * 86400 }
+      );
+    } catch (putErr) {
+      console.error("Failed to write daily stats to KV:", putErr);
+    }
+  }
+
+  // e) Ja definēts env.ANALYTICS, ieraksta telemetrijas punktu par sistēmas veselības pārbaudi
+  if (env.ANALYTICS && typeof env.ANALYTICS.writeDataPoint === "function") {
+    try {
+      env.ANALYTICS.writeDataPoint({
+        indexes: ["system"],
+        blobs: [
+          "system.cron_health",
+          "mcpx",
+          todayDate,
+          summary.status,
+          controller?.cron || "0 8 * * *",
+        ],
+        doubles: [
+          totalActiveKeys,
+          lowBalanceKeys.length,
+          Date.now(),
+        ],
+      });
+    } catch (telemetryErr) {
+      console.error("Failed to record cron telemetry:", telemetryErr);
+    }
+  }
+
+  return summary;
 }
 
 const MAX_PAYLOAD_BYTES = 512 * 1024; // 512 KB drošības slieksnis
@@ -1998,5 +2098,9 @@ claude mcp add --transport sse mcpx https://mcpx.harrykrauze.com/mcp/sse --heade
       }),
       { method: "not_found", status: "client_error" }
     );
+  },
+
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    await handleScheduled(controller, env, ctx);
   },
 };
