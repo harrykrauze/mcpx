@@ -30,9 +30,10 @@ import {
 } from "./tools/domainTools";
 import { handleCreemWebhook } from "./routes/webhooks";
 import { renderDashboardHtml, HealthStatus } from "./views/dashboard";
+import { INDEXNOW_KEY, INDEXNOW_KEY_FILE, submitIndexNow } from "./indexnow";
 
 export type { Env, ExecutionContext, TelemetryPoint, HealthStatus, ScheduledController, LowBalanceRecord, DailyAuditSummary };
-export { detectClientType, recordTelemetry, renderDashboardHtml, TOOL_ALIASES, resolveCanonicalToolName, LLMS_TXT_CONTENT, LLMS_FULL_TXT_CONTENT };
+export { detectClientType, recordTelemetry, renderDashboardHtml, TOOL_ALIASES, resolveCanonicalToolName, LLMS_TXT_CONTENT, LLMS_FULL_TXT_CONTENT, INDEXNOW_KEY, INDEXNOW_KEY_FILE, submitIndexNow };
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -336,12 +337,18 @@ export function create402RestResponse(
   const invoiceUrl = `https://mcpx.harrykrauze.com/billing/topup?tenant=${encodeURIComponent(tenantId)}`;
   return new Response(
     JSON.stringify({
-      error: "Payment Required: Insufficient credit balance.",
+      error: "INSUFFICIENT_CREDITS",
+      message: "Payment Required: Insufficient credit balance.",
       code: 402,
       tenantId,
       balanceCents,
       requiredCents: costCents,
       invoice: invoiceUrl,
+      details: {
+        requiredCredits: costCents,
+        availableCredits: balanceCents,
+        topUpUrl: invoiceUrl,
+      },
     }),
     {
       status: 402,
@@ -594,6 +601,53 @@ export default {
           },
         }),
         { method: "llms-full.txt", status: "success" }
+      );
+    }
+
+    // 1c.1. Serve IndexNow Verification Key
+    if (url.pathname === `/${INDEXNOW_KEY_FILE}` || url.pathname === "/indexnow.txt") {
+      return track(
+        new Response(INDEXNOW_KEY, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*",
+          },
+        }),
+        { method: "indexnow.txt", status: "success" }
+      );
+    }
+
+    // 1c.2. IndexNow Trigger Endpoint
+    if (url.pathname === "/api/indexnow/submit" && request.method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const expectedAdminSecret = (env as any).INDEXNOW_ADMIN_SECRET || "dev_secret_bypass";
+
+      if (!authHeader.includes(expectedAdminSecret) && (env as any).ENVIRONMENT === "production") {
+        return track(
+          new Response(JSON.stringify({ error: "Unauthorized" }), {
+            status: 401,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          }),
+          { method: "api/indexnow/submit", status: "security_violation" }
+        );
+      }
+
+      const result = await submitIndexNow();
+      return track(
+        new Response(
+          JSON.stringify({
+            success: result.status === 200 || result.status === 202,
+            indexNowStatus: result.status,
+            message: result.text || "Submitted successfully to api.indexnow.org",
+          }),
+          {
+            status: result.status === 200 || result.status === 202 ? 200 : 502,
+            headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+          }
+        ),
+        { method: "api/indexnow/submit", status: result.status === 200 || result.status === 202 ? "success" : "client_error" }
       );
     }
 
@@ -1484,11 +1538,12 @@ export default {
           name?: string;
           parameters?: any;
           arguments?: any;
+          params?: any;
         };
 
         const rawTool = body.tool || body.name || "";
         const toolName = resolveCanonicalToolName(rawTool);
-        const toolArgs = body.parameters || body.arguments || {};
+        const toolArgs = body.parameters || body.arguments || body.params || {};
 
         const validTools = [
           "calculate_u_value_iso6946",

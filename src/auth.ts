@@ -479,7 +479,7 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
             };
           }
 
-          if (record.status === "active") {
+          if (record.status === "active" || (record.status as string)?.toLowerCase() === "active") {
             // Check expiration timestamp if configured
             if (record.expiresAt) {
               const expTime = new Date(record.expiresAt).getTime();
@@ -503,22 +503,24 @@ export async function requireAuth(request: Request, env: Env): Promise<AuthResul
               }
             }
 
+            const rawBalance = (record as any).balanceCents;
+            const balanceCents = typeof rawBalance === "number" ? rawBalance : 100;
             const billing: BillingDetails = record.billing || {
               mode: "prepaid",
-              balanceCents: 100,
+              balanceCents,
               currency: "USD",
               costPerToolCallCents: 1,
               costPerGenerateCents: 5,
-              totalSpentCents: 0,
+              totalSpentCents: (record as any).totalSpentCents || 0,
               lowBalanceThresholdCents: 50,
             };
 
             return {
               authorized: true,
               context: {
-                userId: record.userId,
-                tenantId: record.tenantId || record.userId,
-                plan: record.plan,
+                userId: record.userId || record.tenantId || "anonymous",
+                tenantId: record.tenantId || record.userId || "anonymous",
+                plan: record.plan || "pro",
                 requestsLimit: record.requestsLimit,
                 scopes: record.scopes || ["mcp:read", "mcp:write", "mcp:generate"],
                 apiKey: token,

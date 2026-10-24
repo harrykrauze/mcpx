@@ -53,11 +53,12 @@
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "tsx test/creem-webhook.test.ts && tsx test/dashboard-and-verify.test.ts && tsx test/scheduled.test.ts && vitest run test/aeo-discovery.test.ts",
+    "test": "tsx test/creem-webhook.test.ts && tsx test/dashboard-and-verify.test.ts && tsx test/scheduled.test.ts && vitest run test/aeo-discovery.test.ts test/indexnow-and-x402.test.ts",
     "test:creem": "tsx test/creem-webhook.test.ts",
     "test:dashboard": "tsx test/dashboard-and-verify.test.ts",
     "test:scheduled": "tsx test/scheduled.test.ts",
-    "test:aeo": "vitest run test/aeo-discovery.test.ts"
+    "test:aeo": "vitest run test/aeo-discovery.test.ts",
+    "test:indexnow": "vitest run test/indexnow-and-x402.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
