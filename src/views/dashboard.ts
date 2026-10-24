@@ -37,6 +37,36 @@ export function renderDashboardHtml(health: HealthStatus): string {
           "highPrice": "0.05",
           "offerCount": "4"
         },
+        "hasOfferCatalog": {
+          "@type": "OfferCatalog",
+          "name": "mcpx Ladder of Trust x402 Pricing Matrix",
+          "itemListElement": [
+            {
+              "@type": "Offer",
+              "name": "Discovery Free Tier (tools/list, initialize, /llms.txt)",
+              "price": "0.00",
+              "priceCurrency": "USD"
+            },
+            {
+              "@type": "Offer",
+              "name": "Security & Risk Tier (analyze_jev_semantic_ast, evaluate_fraud_transaction)",
+              "price": "0.01",
+              "priceCurrency": "USD"
+            },
+            {
+              "@type": "Offer",
+              "name": "Deep Calculations Tier (calculate_u_value_iso6946)",
+              "price": "0.02",
+              "priceCurrency": "USD"
+            },
+            {
+              "@type": "Offer",
+              "name": "Edge Sandbox Run Tier (generate_mcp_server)",
+              "price": "0.05",
+              "priceCurrency": "USD"
+            }
+          ]
+        },
         "creator": {
           "@type": "Person",
           "@id": "https://harrykrauze.com/#person",

@@ -34,7 +34,7 @@ export async function handleCreemWebhook(
   }
 
   // 1. Verify secret presence
-  const webhookSecret = env.CREEM_WEBHOOK_SECRET || process.env.CREEM_WEBHOOK_SECRET;
+  const webhookSecret = env.CREEM_WEBHOOK_SECRET;
   if (!webhookSecret) {
     console.error("CREEM_WEBHOOK_SECRET is not configured.");
     return new Response(

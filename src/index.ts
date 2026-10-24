@@ -384,6 +384,8 @@ export function create402RestResponse(
         "X-MCPX-Tenant": tenantId,
         "X-MCPX-Balance-Cents": String(balanceCents),
         "X-MCPX-Required-Cents": String(costCents),
+        "X-Credits-Required": String(costCents),
+        "X-MCPX-Topup-URL": invoiceUrl,
         ...CORS_HEADERS,
       },
     }
@@ -420,6 +422,8 @@ export function create402McpResponse(
         "X-MCPX-Tenant": tenantId,
         "X-MCPX-Balance-Cents": String(balanceCents),
         "X-MCPX-Required-Cents": String(costCents),
+        "X-Credits-Required": String(costCents),
+        "X-MCPX-Topup-URL": invoiceUrl,
         ...CORS_HEADERS,
       },
     }
